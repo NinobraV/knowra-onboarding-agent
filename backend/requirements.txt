@@ -1,22 +1,19 @@
 # FastAPI and server
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-python-dotenv==1.0.0
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
 
 # LangChain and RAG
-langchain==0.1.4
-langchain-openai==0.0.5
-langchain-community==0.0.16
-langchain-core==0.1.23
+langchain==0.3.9
+langchain-openai==0.2.10
+langchain-community==0.3.8
+langchain-core==0.3.21
 
 # Vector store
-chromadb==0.4.22
+pinecone-client==5.0.1
 
 # OpenAI
-openai==1.10.0
-
-# Additional utilities
-pydantic==2.5.3
+openai==1.55.3
 pydantic-settings==2.1.0
 python-multipart==0.0.6
 

@@ -64,8 +64,8 @@ class HealthResponse(BaseModel):
                 "status": "healthy",
                 "stats": {
                     "documents_loaded": 9,
-                    "vector_store_path": "./backend/chroma_db",
-                    "embedding_model": "text-embedding-3-small",
+                    "vector_store_type": "Pinecone",
+                    "embedding_model": "llama-text-embed-v2",
                     "llm_model": "gpt-4o-mini",
                     "memory_window": 10
                 }

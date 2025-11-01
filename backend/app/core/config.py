@@ -2,16 +2,27 @@
 Core configuration and settings for the Knowledge Chatbot backend.
 """
 import os
-from typing import List
-from pydantic_settings import BaseSettings
+import json
+from pathlib import Path
+from typing import List, Union
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from the project root
+env_path = Path(__file__).parent.parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 
 class Settings(BaseSettings):
     """Application settings and configuration."""
+    
+    model_config = SettingsConfigDict(
+        env_file="../.env",
+        case_sensitive=True,
+        env_prefix="",
+        json_schema_extra={"env_parse_none_str": ""}
+    )
     
     # Application
     APP_NAME: str = "Knowledge Chatbot API"
@@ -29,15 +40,43 @@ class Settings(BaseSettings):
         "http://localhost:3000"
     ]
     
+    @field_validator('ALLOWED_ORIGINS', mode='before')
+    @classmethod
+    def parse_allowed_origins(cls, v):
+        """Parse ALLOWED_ORIGINS from various formats."""
+        if isinstance(v, str):
+            # Handle empty string
+            if not v or v.strip() == "":
+                return ["http://localhost:5173", "http://localhost:3000"]
+            # Try JSON parsing first
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Fall back to comma-separated
+            return [origin.strip() for origin in v.split(',') if origin.strip()]
+        elif isinstance(v, list):
+            return v
+        return ["http://localhost:5173", "http://localhost:3000"]
+    
     # OpenAI
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_BASE_URL: str = ""
+    OPENAI_API_KEY: str = ""
+    OPENAI_EMBEDDING_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_TEMPERATURE: float = 0.7
     
+    # Pinecone
+    PINECONE_API_KEY: str = ""
+    PINECONE_ENVIRONMENT: str = ""
+    PINECONE_INDEX_NAME: str = "knowra-onboarding"
+    
     # RAG Configuration
-    DATA_DIR: str = "./backend/data/raw"
-    VECTOR_STORE_DIR: str = "./backend/chroma_db"
+    DATA_DIR: str = "../data/raw"
+    VECTOR_STORE_DIR: str = "./backend/.vectorstore"  # For hash storage only
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
     RETRIEVER_K: int = 5
@@ -45,11 +84,6 @@ class Settings(BaseSettings):
     
     # SSE Streaming
     SSE_DELAY: float = 0.01
-    
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env"
-        case_sensitive = True
 
 
 # Global settings instance
