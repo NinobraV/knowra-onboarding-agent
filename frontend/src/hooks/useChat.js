@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { sendMessageStream, clearHistory } from '../services/api.service';
+import { sendMessage as sendMessageAPI, clearHistory } from '../services/api.service';
 import { MESSAGE_ROLES } from '../utils/constants';
 import { generateId } from '../utils/helpers';
 
@@ -16,7 +16,6 @@ export const useChat = () => {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [streamingMessageId, setStreamingMessageId] = useState(null);
 
   /**
    * Create a new message object
@@ -42,43 +41,7 @@ export const useChat = () => {
   }, []);
 
   /**
-   * Update a specific message by ID
-   * @param {string} messageId - ID of message to update
-   * @param {Object} updates - Properties to update
-   */
-  const updateMessage = useCallback((messageId, updates) => {
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === messageId ? { ...msg, ...updates } : msg,
-      ),
-    );
-  }, []);
-
-  /**
-   * Remove a message by ID
-   * @param {string} messageId - ID of message to remove
-   */
-  const removeMessage = useCallback((messageId) => {
-    setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
-  }, []);
-
-  /**
-   * Append content to a streaming message
-   * @param {string} messageId - ID of message to update
-   * @param {string} chunk - Content chunk to append
-   */
-  const appendToMessage = useCallback((messageId, chunk) => {
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === messageId
-          ? { ...msg, content: msg.content + chunk }
-          : msg,
-      ),
-    );
-  }, []);
-
-  /**
-   * Send a message and handle streaming response
+   * Send a message and handle response (non-streaming)
    * @param {string} messageText - User message text
    */
   const sendMessage = useCallback(async (messageText) => {
@@ -94,41 +57,24 @@ export const useChat = () => {
     setIsLoading(true);
     setError(null);
 
-    // Create assistant message placeholder
-    const assistantMessageId = generateId();
-    const assistantMessage = createMessage(
-      MESSAGE_ROLES.ASSISTANT,
-      '',
-      { isStreaming: true },
-    );
-    assistantMessage.id = assistantMessageId; // Use specific ID for updates
-    
-    addMessage(assistantMessage);
-    setStreamingMessageId(assistantMessageId);
-
-    // Stream response
-    await sendMessageStream(
-      messageText,
-      // onChunk - append each chunk to the assistant message
-      (chunk) => {
-        appendToMessage(assistantMessageId, chunk);
-      },
-      // onComplete - mark streaming as complete
-      () => {
-        updateMessage(assistantMessageId, { isStreaming: false });
-        setIsLoading(false);
-        setStreamingMessageId(null);
-      },
-      // onError - handle error
-      (err) => {
-        setError(`Error: ${err.message}`);
-        setIsLoading(false);
-        setStreamingMessageId(null);
-        // Remove the incomplete assistant message
-        removeMessage(assistantMessageId);
-      },
-    );
-  }, [isLoading, addMessage, appendToMessage, updateMessage, removeMessage]);
+    try {
+      // Send message and get complete response
+      const response = await sendMessageAPI(messageText);
+      
+      // Create assistant message with complete response
+      const assistantMessage = createMessage(
+        MESSAGE_ROLES.ASSISTANT,
+        response.response || response.answer || response.message || 'No response',
+        { isStreaming: false },
+      );
+      
+      addMessage(assistantMessage);
+      setIsLoading(false);
+    } catch (err) {
+      setError(`Error: ${err.message}`);
+      setIsLoading(false);
+    }
+  }, [isLoading, addMessage, createMessage]);
 
   /**
    * Clear all messages and chat history
@@ -157,15 +103,12 @@ export const useChat = () => {
     messages,
     isLoading,
     error,
-    streamingMessageId,
     
     // Actions
     sendMessage,
     clearMessages,
     clearError,
     addMessage,
-    updateMessage,
-    removeMessage,
   };
 };
 

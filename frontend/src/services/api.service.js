@@ -105,7 +105,14 @@ export const sendMessageStream = async (message, onChunk, onComplete, onError) =
           }
 
           if (data) {
-            onChunk(data);
+            // Parse JSON if the data is a JSON string
+            try {
+              const parsedData = JSON.parse(data);
+              onChunk(parsedData);
+            } catch {
+              // If not JSON, send raw string data
+              onChunk(data);
+            }
           }
         }
       }

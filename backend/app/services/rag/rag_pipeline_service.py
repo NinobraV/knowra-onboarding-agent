@@ -152,7 +152,7 @@ class RAGPipelineService:
         def retrieve_context(query: str) -> str:
             """Retrieve relevant context from the knowledge base."""
             try:
-                docs = retriever.invoke(query)
+                docs = self.search_service.semantic_search(query, k=self.retriever_k)
                 if not docs:
                     return "No relevant information found in the knowledge base."
                 return "\n\n".join([doc.page_content for doc in docs])
@@ -217,7 +217,7 @@ class RAGPipelineService:
             if "agent" in chunk:
                 if "messages" in chunk["agent"]:
                     for message in chunk["agent"]["messages"]:
-                        if hasattr(message, "content"):
+                        if hasattr(message, "content") and message.content.strip():
                             yield message.content
     
     def chat(self, query: str) -> str:
