@@ -47,7 +47,7 @@ class RAGPipelineService:
         chunk_overlap: int = 200,
         embedding_model: str = "text-embedding-3-small",
         llm_model: str = "gpt-4o-mini",
-        llm_temperature: float = 0.7,
+        llm_temperature: float = 0,
         retriever_k: int = 5,
         memory_window: int = 10
     ):
