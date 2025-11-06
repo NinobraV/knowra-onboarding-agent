@@ -4,8 +4,8 @@ import {
   StatusBar,
   ErrorBanner,
   MessageList,
-  ChatInput,
 } from './components';
+import ChatInput from './components/ChatInput';
 import { useChat } from './hooks/useChat';
 import { useHealthCheck } from './hooks/useHealthCheck';
 import './index.css';
@@ -49,7 +49,6 @@ function App() {
 
       <main className="main-content">
         <div className="container">
-          {/* StatusBar: no clear button, no docs count */}
           <StatusBar
             healthStatus={healthStatus}
             isLoading={isLoading}
@@ -73,7 +72,7 @@ function App() {
               onSendMessage={handleSendMessage}
               isLoading={isLoading}
               disabled={!!healthError}
-              maxChars={2000}
+              maxChars={500}
             />
           </div>
         </div>
