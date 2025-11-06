@@ -57,7 +57,8 @@ class RAGService:
             llm_model=settings.OPENAI_MODEL,
             llm_temperature=settings.OPENAI_TEMPERATURE,
             retriever_k=settings.RETRIEVER_K,
-            memory_window=settings.MEMORY_WINDOW
+            memory_window=settings.MEMORY_WINDOW,
+            pca_components=settings.PCA
         )
     
     def rebuild_if_needed(self) -> bool:

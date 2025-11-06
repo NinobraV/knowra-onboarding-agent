@@ -46,6 +46,7 @@ class RAGPipelineService:
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
         embedding_model: str = "text-embedding-3-small",
+        pca_components: int = None,  # New parameter for PCA
         llm_model: str = "gpt-4o-mini",
         llm_temperature: float = 0.7,
         retriever_k: int = 5,
@@ -84,7 +85,8 @@ class RAGPipelineService:
         
         self.embedding_service = EmbeddingService(
             openai_api_key=embedding_api_key,
-            model=embedding_model
+            model=embedding_model,
+            pca_components=pca_components  # Pass to EmbeddingService
         )
         
         self.vector_store_service = VectorStoreService(
