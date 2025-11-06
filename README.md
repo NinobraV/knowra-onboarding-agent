@@ -1,6 +1,6 @@
 # 🤖 Knowledge Chatbot (Knowra Onboarding Agent)
 
-A production-ready RAG (Retrieval-Augmented Generation) chatbot with streaming responses, built with FastAPI, React, LangChain, and ChromaDB.
+A production-ready RAG (Retrieval-Augmented Generation) chatbot with streaming responses, built with FastAPI microservices, React, LangChain, and Pinecone.
 
 ## 📋 Table of Contents
 
@@ -25,6 +25,7 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 - **Instant Answers**: Get accurate answers from your documentation in seconds
 - **Streaming Responses**: Real-time typing effect using Server-Sent Events (SSE)
 - **Smart Memory**: Maintains conversation context with 10-message window
+- **Microservices Architecture**: Separate ingestion and query services for better scalability
 - **Auto-Updates**: Automatically detects and rebuilds vector store on document changes
 - **Beautiful UI**: Modern dark-theme interface with smooth animations
 
@@ -32,10 +33,11 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **Backend** | FastAPI (Python 3.9+) | REST API with SSE streaming |
+| **Backend** | FastAPI (Python 3.12) | Query service with SSE streaming |
+| **Ingestion** | FastAPI (Python 3.12) | Document processing & vector store management |
 | **Frontend** | React 18 + Vite 5 | Modern SPA with hooks |
 | **RAG Engine** | LangChain | Document processing & conversational agent |
-| **Vector DB** | ChromaDB | Local, persistent vector store |
+| **Vector DB** | Pinecone | Cloud-based vector store |
 | **LLM** | OpenAI GPT-4o-mini | Response generation |
 | **Embeddings** | text-embedding-3-small | Semantic search |
 | **Memory** | ConversationBufferWindowMemory | 10-message context window |
@@ -43,7 +45,8 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 ## ✨ Features
 
 - 🚀 **Streaming Responses**: Real-time SSE streaming with typing effect
-- 🧠 **RAG Pipeline**: ChromaDB vector store + OpenAI embeddings + LangChain agent
+- 🏗️ **Microservices Architecture**: Separate services for ingestion (Port 8001) and queries (Port 8000)
+- 🧠 **RAG Pipeline**: Pinecone vector store + OpenAI embeddings + LangChain agent
 - 🤖 **Intelligent Agent**: OpenAI tools agent with retriever and conversation memory
 - 🔄 **Auto-Rebuild**: SHA-256 hash-based change detection for automatic vector store updates
 - 💬 **Conversation History**: ConversationBufferWindowMemory maintains last 10 messages
@@ -52,6 +55,7 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 - 🧹 **Clear History**: Reset conversation memory with one click
 - 🔐 **CORS Enabled**: Configured for frontend-backend communication
 - 📄 **Markdown Knowledge Base**: 9 comprehensive documentation files
+- ☁️ **Cloud Vector Store**: Pinecone for scalable, distributed vector search
 
 ## 🏗️ Architecture
 
@@ -65,10 +69,16 @@ graph TB
         API_CLIENT[API Client<br/>Fetch API]
     end
     
-    subgraph "Backend Layer - FastAPI"
+    subgraph "Backend Service - Port 8000"
         ROUTES[API Routes<br/>/api/chat, /api/health]
         DEPS[Dependencies<br/>RAG Service Singleton]
         CORS[CORS Middleware]
+    end
+    
+    subgraph "Ingestion Service - Port 8001"
+        ING_ROUTES[API Routes<br/>/api/ingest, /api/rebuild]
+        ING_SERVICE[Ingestion Service<br/>Document Processing]
+        CHUNK_SVC[Chunking Service<br/>Text Splitting]
     end
     
     subgraph "RAG Service - LangChain"
@@ -78,8 +88,8 @@ graph TB
         LLM[ChatOpenAI<br/>gpt-4o-mini streaming]
     end
     
-    subgraph "Vector Store - ChromaDB"
-        CHROMA[Chroma Vector DB<br/>Persistent Storage]
+    subgraph "Vector Store - Pinecone Cloud"
+        PINECONE[Pinecone Index<br/>Cloud Vector DB]
         EMBED[OpenAI Embeddings<br/>text-embedding-3-small]
         HASH[SHA-256 Hash<br/>Change Detection]
     end
@@ -93,23 +103,28 @@ graph TB
     UI --> API_CLIENT
     SSE --> ROUTES
     API_CLIENT --> ROUTES
+    API_CLIENT -.-> ING_ROUTES
     ROUTES --> CORS
     ROUTES --> DEPS
     DEPS --> AGENT
     AGENT --> MEMORY
     AGENT --> TOOL
     AGENT --> LLM
-    TOOL --> CHROMA
-    CHROMA --> EMBED
-    CHROMA --> HASH
-    HASH --> MD
-    MD --> SPLITTER
-    SPLITTER --> CHROMA
+    TOOL --> PINECONE
+    
+    ING_ROUTES --> ING_SERVICE
+    ING_SERVICE --> CHUNK_SVC
+    CHUNK_SVC --> SPLITTER
+    SPLITTER --> MD
+    ING_SERVICE --> EMBED
+    EMBED --> PINECONE
+    ING_SERVICE --> HASH
     
     style UI fill:#e3f2fd
     style ROUTES fill:#fff3e0
+    style ING_ROUTES fill:#fff9c4
     style AGENT fill:#f3e5f5
-    style CHROMA fill:#e8f5e9
+    style PINECONE fill:#e8f5e9
     style MD fill:#fce4ec
 ```
 
@@ -119,45 +134,40 @@ graph TB
 sequenceDiagram
     participant User
     participant React as React Frontend
-    participant FastAPI as FastAPI Backend
-    participant RAG as RAG Service
+    participant Backend as Backend Service<br/>(Port 8000)
+    participant Ingestion as Ingestion Service<br/>(Port 8001)
     participant Agent as LangChain Agent
     participant Memory as Conversation Memory
-    participant Chroma as ChromaDB
+    participant Pinecone as Pinecone Cloud
     participant OpenAI as OpenAI API
     
     User->>React: Type message & send
-    React->>FastAPI: POST /api/chat {message, stream:true}
-    FastAPI->>RAG: rebuild_if_needed()
+    React->>Backend: POST /api/chat {message, stream:true}
     
-    alt Files Changed
-        RAG->>RAG: Calculate SHA-256 hash
-        RAG->>RAG: Compare with stored hash
-        RAG->>Chroma: Rebuild vector store
-    else No Changes
-        RAG->>RAG: Use existing vector store
-    end
+    Note over Backend,Ingestion: Ingestion runs independently
+    Ingestion->>Ingestion: Monitor data/raw/ changes
+    Ingestion->>Pinecone: Auto-update vectors on change
     
-    FastAPI->>Agent: stream_response(query)
+    Backend->>Agent: stream_response(query)
     Agent->>Memory: Load last 10 messages
     Agent->>Agent: Analyze query with context
-    Agent->>Chroma: knowledge_base_search(query, k=5)
-    Chroma->>OpenAI: Generate query embedding
-    OpenAI-->>Chroma: Return embedding vector
-    Chroma->>Chroma: Similarity search
-    Chroma-->>Agent: Return top 5 documents
+    Agent->>Pinecone: knowledge_base_search(query, k=5)
+    Pinecone->>OpenAI: Generate query embedding
+    OpenAI-->>Pinecone: Return embedding vector
+    Pinecone->>Pinecone: Similarity search
+    Pinecone-->>Agent: Return top 5 documents
     Agent->>OpenAI: Stream completion with context
     
     loop For each token
         OpenAI-->>Agent: Token chunk
-        Agent-->>FastAPI: Yield chunk
-        FastAPI-->>React: SSE: data: {chunk}
+        Agent-->>Backend: Yield chunk
+        Backend-->>React: SSE: data: {chunk}
         React->>User: Display with typing effect
     end
     
     OpenAI-->>Agent: [DONE]
     Agent->>Memory: Save Q&A to history
-    FastAPI-->>React: SSE: data: [DONE]
+    Backend-->>React: SSE: data: [DONE]
     React->>User: Show complete response
 ```
 
@@ -165,32 +175,26 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    START([Request received]) --> CHECK{Vector store exists?}
-    CHECK -->|No| BUILD[Build new vector store]
-    CHECK -->|Yes| HASH[Calculate current hash]
+    START([Document added/changed]) --> DETECT[SHA-256 Hash Detection<br/>Ingestion Service]
+    DETECT --> COMPARE{Hash changed?}
     
-    HASH --> LOAD_HASH[Load stored hash]
-    LOAD_HASH --> COMPARE{Hashes match?}
-    
-    COMPARE -->|Yes| SKIP[Use existing store]
-    COMPARE -->|No| REBUILD[Rebuild vector store]
-    
-    BUILD --> READ[Read all .md files]
-    REBUILD --> READ
+    COMPARE -->|No| SKIP[Skip rebuild]
+    COMPARE -->|Yes| READ[Read all .md files]
     
     READ --> SPLIT[Split into chunks<br/>size=1000, overlap=200]
     SPLIT --> EMBED[Generate embeddings<br/>OpenAI API]
-    EMBED --> STORE[Store in ChromaDB]
+    EMBED --> STORE[Store in Pinecone<br/>Cloud Vector DB]
     STORE --> SAVE_HASH[Save new hash]
     SAVE_HASH --> READY[Ready for queries]
     
     SKIP --> READY
+    READY --> QUERY[Backend Service<br/>Handles Queries]
     
-    style START fill:#e3f2fd
-    style BUILD fill:#fff3e0
-    style REBUILD fill:#fff3e0
+    style START fill:#fff3e0
+    style DETECT fill:#f3e5f5
+    style STORE fill:#e8f5e9
     style READY fill:#c8e6c9
-    style SKIP fill:#e8f5e9
+    style QUERY fill:#e3f2fd
 ```
 
 ### Component Architecture
@@ -205,16 +209,24 @@ graph LR
         API[api.js<br/>API Client]
     end
     
-    subgraph "Backend Structure"
+    subgraph "Backend Service (Port 8000)"
         MAIN[main.py<br/>FastAPI App]
-        ROUTES_B[routes.py<br/>API Endpoints]
-        RAG_SVC[rag_service.py<br/>RAG Logic]
+        ROUTES_B[routes.py<br/>Chat API Endpoints]
+        RAG_SVC[rag_pipeline_service.py<br/>Query Logic]
         CONFIG[config.py<br/>Settings]
         DEPS_B[dependencies.py<br/>Singletons]
     end
     
-    subgraph "Core Services"
-        VECTOR[Vector Store<br/>ChromaDB]
+    subgraph "Ingestion Service (Port 8001)"
+        ING_MAIN[main.py<br/>FastAPI App]
+        ING_ROUTES[routes.py<br/>Ingestion API]
+        ING_SVC[ingestion_service.py<br/>Document Processing]
+        CHUNK[chunking_service.py<br/>Text Splitting]
+    end
+    
+    subgraph "Shared Services"
+        VECTOR[Vector Store<br/>Pinecone Cloud]
+        EMBED_SVC[Embedding Service<br/>OpenAI]
         LLM_SVC[LLM Service<br/>OpenAI]
         MEM[Memory Service<br/>LangChain]
     end
@@ -233,8 +245,15 @@ graph LR
     RAG_SVC --> LLM_SVC
     RAG_SVC --> MEM
     
+    ING_MAIN --> ING_ROUTES
+    ING_ROUTES --> ING_SVC
+    ING_SVC --> CHUNK
+    ING_SVC --> EMBED_SVC
+    ING_SVC --> VECTOR
+    
     style APP fill:#e3f2fd
     style MAIN fill:#fff3e0
+    style ING_MAIN fill:#fff9c4
     style RAG_SVC fill:#f3e5f5
     style VECTOR fill:#e8f5e9
 ```
@@ -243,14 +262,13 @@ graph LR
 
 ```mermaid
 flowchart LR
-    START([Add/Edit MD file]) --> DETECT[SHA-256 Hash Detection]
+    START([Add/Edit MD file]) --> DETECT[SHA-256 Hash Detection<br/>Ingestion Service]
     DETECT --> LOAD[Load Documents]
     LOAD --> CHUNK[Chunk Documents<br/>RecursiveCharacterTextSplitter]
     CHUNK --> EMBED[Generate Embeddings<br/>OpenAI API]
-    EMBED --> STORE[(ChromaDB<br/>Vector Store)]
-    STORE --> PERSIST[Persist to Disk]
-    PERSIST --> HASH_SAVE[Save Hash<br/>.content_hash]
-    HASH_SAVE --> READY[✅ Ready]
+    EMBED --> STORE[(Pinecone Cloud<br/>Vector Store)]
+    STORE --> HASH_SAVE[Save Hash<br/>.content_hash]
+    HASH_SAVE --> READY[✅ Ready for Queries<br/>Backend Service]
     
     style START fill:#fff3e0
     style DETECT fill:#f3e5f5
@@ -262,9 +280,10 @@ flowchart LR
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.12+
 - Node.js 18+
 - OpenAI API Key
+- Pinecone API Key
 
 ### 1. Clone the Repository
 
@@ -273,7 +292,25 @@ git clone <repository-url>
 cd knowra-onboarding-agent
 ```
 
-### 2. Backend Setup
+### 2. Environment Setup
+
+Create a `.env` file in the root directory:
+
+```env
+# OpenAI Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_EMBEDDING_API_KEY=your_openai_api_key_here
+
+# Pinecone Configuration
+PINECONE_API_KEY=your_pinecone_api_key_here
+PINECONE_ENVIRONMENT=your_pinecone_environment
+PINECONE_INDEX_NAME=knowra-onboarding
+
+# Server Configuration
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+### 3. Backend Service Setup (Port 8000)
 
 ```bash
 # Navigate to backend directory
@@ -292,13 +329,26 @@ source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Create .env file and add your OpenAI API key
-# Copy .env.example to .env and edit:
-# OPENAI_API_KEY=your_openai_api_key_here
 ```
 
-### 3. Frontend Setup
+### 4. Ingestion Service Setup (Port 8001)
+
+```bash
+# Navigate to ingestion directory (from root)
+cd rag-ingestion
+
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+# Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 5. Frontend Setup
 
 ```bash
 # Navigate to frontend directory (from root)
@@ -311,63 +361,111 @@ npm install
 # Default: VITE_API_URL=http://localhost:8000
 ```
 
-### 4. Run the Application
+### 6. Run the Application
 
-**Terminal 1 - Backend:**
+**Terminal 1 - Ingestion Service:**
+
+```bash
+cd rag-ingestion
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+**Terminal 2 - Backend Service:**
 
 ```bash
 cd backend
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Terminal 2 - Frontend:**
+**Terminal 3 - Frontend:**
 
 ```bash
 cd frontend
 npm run dev
 ```
 
-### 5. Access the Application
+### 7. Initial Data Ingestion
+
+After starting the ingestion service, trigger the initial vector store build:
+
+```bash
+curl -X POST http://localhost:8001/api/rebuild
+```
+
+### 8. Access the Application
 
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/api/health
+- **Ingestion API**: http://localhost:8001
+- **Backend API Docs**: http://localhost:8000/docs
+- **Ingestion API Docs**: http://localhost:8001/docs
+- **Backend Health**: http://localhost:8000/api/health
+- **Ingestion Health**: http://localhost:8001/api/health
 
 ## 📁 Project Structure
 
 ```
 knowra-onboarding-agent/
-├── backend/
+├── backend/                           # Query Service (Port 8000)
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                    # FastAPI application entry point
-│   │   ├── rag.py                     # Legacy wrapper (deprecated)
 │   │   ├── api/
 │   │   │   ├── __init__.py
-│   │   │   └── routes.py              # API route definitions
+│   │   │   └── routes.py              # Chat API routes
 │   │   ├── core/
 │   │   │   ├── __init__.py
-│   │   │   ├── config.py              # Application configuration
-│   │   │   └── dependencies.py        # Dependency injection & singletons
+│   │   │   ├── config.py              # Backend configuration
+│   │   │   └── dependencies.py        # Dependency injection
 │   │   ├── models/
 │   │   │   ├── __init__.py
-│   │   │   └── schemas.py             # Pydantic models for request/response
+│   │   │   └── schemas.py             # Request/response models
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   │   └── rag_service.py         # RAG service implementation
+│   │   │   └── rag/
+│   │   │       ├── __init__.py
+│   │   │       ├── embedding_service.py        # Query embeddings
+│   │   │       ├── vector_store_service.py     # Read-only Pinecone
+│   │   │       ├── semantic_search_service.py  # Similarity search
+│   │   │       ├── ranking_service.py          # Result ranking
+│   │   │       ├── llm_service.py              # OpenAI streaming
+│   │   │       └── rag_pipeline_service.py     # Query orchestration
 │   │   └── utils/
 │   │       ├── __init__.py
 │   │       ├── helpers.py             # Helper functions
 │   │       └── logger.py              # Logging configuration
-│   ├── chroma_db/                     # ChromaDB persistence directory
-│   │   ├── chroma.sqlite3
-│   │   └── .content_hash              # SHA-256 hash for change detection
-│   ├── requirements.txt               # Python dependencies
-│   └── .env                           # Environment variables
+│   └── requirements.txt               # Python dependencies
+│
+├── rag-ingestion/                     # Ingestion Service (Port 8001)
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py                    # FastAPI application entry point
+│   │   ├── api/
+│   │   │   ├── __init__.py
+│   │   │   └── routes.py              # Ingestion API routes
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py              # Ingestion configuration
+│   │   │   └── dependencies.py        # Dependency injection
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   └── schemas.py             # Request/response models
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   ├── chunking_service.py    # Document chunking
+│   │   │   ├── embedding_service.py   # Embedding generation
+│   │   │   ├── vector_store_service.py # Write Pinecone
+│   │   │   └── ingestion_service.py   # Ingestion orchestration
+│   │   └── utils/
+│   │       ├── __init__.py
+│   │       └── logger.py              # Logging configuration
+│   └── requirements.txt               # Python dependencies
 │
 ├── data/
+│   ├── processed/
+│   │   └── hybrid_splitter_config.yaml
 │   └── raw/                           # Knowledge base markdown files
+│       ├── 00_PROJECT_INFO.md
 │       ├── 00_README.md
 │       ├── 01_ONBOARDING_GUIDE.md
 │       ├── 02_BUSINESS_OVERVIEW.md
@@ -378,13 +476,23 @@ knowra-onboarding-agent/
 │       ├── 07_DEPLOYMENT_GUIDELINES.md
 │       └── 08_SECURITY_COMPLIANCE.md
 │
-├── frontend/
+├── frontend/                          # React Frontend
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── Header.jsx             # Header component
-│   │   │   ├── ChatMessage.jsx        # Message display with streaming
-│   │   │   └── ChatInput.jsx          # Input component
-│   │   ├── api.js                     # API client for backend
+│   │   │   ├── ChatMessage.jsx        # Message display
+│   │   │   ├── ChatInput.jsx          # Input component
+│   │   │   └── index.js               # Component exports
+│   │   ├── hooks/
+│   │   │   ├── useChat.js             # Chat logic
+│   │   │   ├── useHealthCheck.js      # Health monitoring
+│   │   │   └── useAutoScroll.js       # Auto-scroll
+│   │   ├── services/
+│   │   │   └── api.service.js         # API client
+│   │   ├── utils/
+│   │   │   ├── constants.js           # Constants
+│   │   │   ├── formatters.js          # Format helpers
+│   │   │   └── helpers.js             # Utility functions
 │   │   ├── App.jsx                    # Main app component
 │   │   ├── main.jsx                   # React entry point
 │   │   └── index.css                  # Global styles
@@ -394,14 +502,16 @@ knowra-onboarding-agent/
 │   └── .env                           # Frontend environment variables
 │
 ├── docker-compose.yml                 # Docker Compose configuration
-├── Dockerfile                         # Docker image definition
 ├── README.md                          # This file
-└── setup.ps1 / setup.sh              # Setup scripts
+├── setup.ps1                          # Windows setup script
+└── setup.sh                           # Linux/Mac setup script
 ```
 
 ## 📡 API Endpoints
 
-### Health Check
+### Backend Service (Port 8000) - Query & Chat
+
+#### Health Check
 
 ```http
 GET /api/health
@@ -412,17 +522,15 @@ GET /api/health
 {
   "status": "healthy",
   "stats": {
-    "documents_loaded": 9,
-    "vector_store_path": "./backend/chroma_db",
+    "vector_store_initialized": true,
     "embedding_model": "text-embedding-3-small",
     "llm_model": "gpt-4o-mini",
-    "memory_window": 10,
-    "last_hash": "a1b2c3d4"
+    "memory_window": 10
   }
 }
 ```
 
-### Chat (Streaming)
+#### Chat (Streaming)
 
 ```http
 POST /api/chat
@@ -443,7 +551,7 @@ data: ...
 data: [DONE]
 ```
 
-### Chat (Non-Streaming)
+#### Chat (Non-Streaming)
 
 ```http
 POST /api/chat
@@ -462,7 +570,7 @@ Content-Type: application/json
 }
 ```
 
-### Clear History
+#### Clear History
 
 ```http
 POST /api/clear
@@ -475,7 +583,67 @@ POST /api/clear
 }
 ```
 
-### Rebuild Vector Store
+### Ingestion Service (Port 8001) - Document Processing
+
+#### Health Check
+
+```http
+GET /api/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "stats": {
+    "service": "rag-ingestion",
+    "version": "1.0.0",
+    "pinecone_index": "knowra-onboarding"
+  }
+}
+```
+
+#### Status Check
+
+```http
+GET /api/status
+```
+
+**Response:**
+```json
+{
+  "initialized": true,
+  "documents_count": 9,
+  "last_updated": "2025-11-06T01:53:44Z",
+  "data_hash": "a1b2c3d4e5f6..."
+}
+```
+
+#### Ingest Documents
+
+```http
+POST /api/ingest
+Content-Type: application/json
+
+{
+  "force_rebuild": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Documents ingested successfully",
+  "stats": {
+    "documents_processed": 9,
+    "chunks_created": 150,
+    "embeddings_generated": 150
+  }
+}
+```
+
+#### Rebuild Vector Store
 
 ```http
 POST /api/rebuild
@@ -484,21 +652,32 @@ POST /api/rebuild
 **Response:**
 ```json
 {
-  "message": "Vector store rebuilt successfully"
+  "success": true,
+  "message": "Vector store rebuilt successfully",
+  "stats": {
+    "documents_processed": 9,
+    "chunks_created": 150,
+    "vectors_stored": 150
+  }
 }
 ```
 
 ## ⚙️ Configuration
 
-### Backend Environment Variables (backend/.env)
+### Environment Variables (.env in root directory)
 
 ```env
 # OpenAI API Configuration (Required)
 OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_EMBEDDING_API_KEY=your_openai_api_key_here
+
+# Pinecone Configuration (Required)
+PINECONE_API_KEY=your_pinecone_api_key_here
+PINECONE_ENVIRONMENT=your_pinecone_environment
+PINECONE_INDEX_NAME=knowra-onboarding
 
 # Server Configuration
 HOST=0.0.0.0
-PORT=8000
 DEBUG=False
 
 # CORS Origins (comma-separated)
@@ -506,7 +685,6 @@ ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
 
 # RAG Configuration
 DATA_DIR=./data/raw
-VECTOR_STORE_DIR=./backend/chroma_db
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
 RETRIEVER_K=5
@@ -528,10 +706,18 @@ SSE_DELAY=0.01
 VITE_API_URL=http://localhost:8000
 ```
 
+### Service Ports
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **Backend** | 8000 | Query & chat API |
+| **Ingestion** | 8001 | Document ingestion API |
+| **Frontend** | 5173 | React application |
+
 ### Configuration Files
 
 #### backend/app/core/config.py
-Centralized configuration using Pydantic Settings:
+Backend service configuration:
 
 ```python
 class Settings(BaseSettings):
@@ -539,25 +725,64 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o-mini"
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
+    PINECONE_API_KEY: str
+    PINECONE_INDEX_NAME: str
     RETRIEVER_K: int = 5
     MEMORY_WINDOW: int = 10
     # ... more settings
 ```
 
+#### rag-ingestion/app/core/config.py
+Ingestion service configuration:
+
+```python
+class Settings(BaseSettings):
+    APP_NAME: str = "RAG Ingestion Service"
+    APP_VERSION: str = "1.0.0"
+    OPENAI_API_KEY: str
+    OPENAI_EMBEDDING_API_KEY: str
+    PINECONE_API_KEY: str
+    PINECONE_INDEX_NAME: str
+    DATA_DIR: str = "./data/raw"
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 200
+    # ... more settings
+```
+
 ## 🛠️ Development Guide
 
-### Backend Development
+### Microservices Architecture
+
+The application is split into two independent FastAPI services:
+
+#### Backend Service (Port 8000)
+**Purpose**: Query processing and chat interactions
+- Handles user queries and chat requests
+- Performs semantic search on Pinecone
+- Streams responses using LangChain agent
+- Maintains conversation memory
+- **Read-only** access to vector store
+
+#### Ingestion Service (Port 8001)
+**Purpose**: Document processing and vector store management
+- Loads and chunks markdown documents
+- Generates embeddings
+- Writes to Pinecone vector store
+- Manages SHA-256 hash for change detection
+- **Write** access to vector store
+
+### Backend Service Development
 
 #### Project Structure
 
 ```mermaid
 graph TD
-    MAIN[main.py<br/>FastAPI App] --> ROUTES[routes.py<br/>API Endpoints]
+    MAIN[main.py<br/>FastAPI App] --> ROUTES[routes.py<br/>Chat Endpoints]
     ROUTES --> DEPS[dependencies.py<br/>Service Injection]
-    DEPS --> RAG[rag_service.py<br/>Core Logic]
+    DEPS --> RAG[rag_pipeline_service.py<br/>Query Logic]
     RAG --> CONFIG[config.py<br/>Settings]
+    RAG --> SEARCH[semantic_search_service.py]
+    RAG --> LLM[llm_service.py]
     ROUTES --> SCHEMAS[schemas.py<br/>Pydantic Models]
     
     style MAIN fill:#fff3e0
@@ -567,38 +792,70 @@ graph TD
 
 #### Key Components
 
-**RAGService (`backend/app/services/rag_service.py`)**
+**RAGPipelineService (`backend/app/services/rag/rag_pipeline_service.py`)**
 
-Core service managing the entire RAG pipeline:
+Query service managing the RAG pipeline:
 
 ```python
-class RAGService:
+class RAGPipelineService:
     def __init__(self):
-        # Initialize embeddings, LLM, memory
-        self.embeddings = OpenAIEmbeddings()
-        self.llm = ChatOpenAI(streaming=True)
+        # Initialize services (read-only)
+        self.vector_store = VectorStoreService()
+        self.search_service = SemanticSearchService()
+        self.llm_service = LLMService()
         self.memory = ConversationBufferWindowMemory(k=10)
-        self._initialize()
-    
-    def _initialize(self):
-        """Build or load vector store"""
-        if self._should_rebuild():
-            self._build_vectorstore()
-        else:
-            self._load_vectorstore()
         self._create_agent()
-    
-    def _should_rebuild(self) -> bool:
-        """Check if files changed using SHA-256"""
-        current_hash = self._calculate_files_hash()
-        stored_hash = self._get_stored_hash()
-        return current_hash != stored_hash
     
     async def stream_response(self, query: str):
         """Stream response chunks"""
         async for chunk in self.agent_executor.astream({"input": query}):
             if "output" in chunk:
                 yield chunk["output"]
+```
+
+### Ingestion Service Development
+
+#### Project Structure
+
+```mermaid
+graph TD
+    MAIN[main.py<br/>FastAPI App] --> ROUTES[routes.py<br/>Ingestion Endpoints]
+    ROUTES --> ING[ingestion_service.py<br/>Orchestration]
+    ING --> CHUNK[chunking_service.py<br/>Text Splitting]
+    ING --> EMBED[embedding_service.py<br/>OpenAI Embeddings]
+    ING --> VECTOR[vector_store_service.py<br/>Pinecone Write]
+    ING --> CONFIG[config.py<br/>Settings]
+    
+    style MAIN fill:#fff9c4
+    style ING fill:#f3e5f5
+    style CONFIG fill:#e8f5e9
+```
+
+#### Key Components
+
+**IngestionService (`rag-ingestion/app/services/ingestion_service.py`)**
+
+Document ingestion orchestration:
+
+```python
+class IngestionService:
+    def __init__(self):
+        self.chunking = ChunkingService()
+        self.embedding = EmbeddingService()
+        self.vector_store = VectorStoreService()
+    
+    def process_documents(self, force_rebuild: bool = False):
+        """Process and ingest documents"""
+        if not force_rebuild and not self._should_rebuild():
+            return {"message": "No changes detected"}
+        
+        # Load and chunk documents
+        docs = self.chunking.load_documents()
+        chunks = self.chunking.split_documents(docs)
+        
+        # Generate embeddings and store
+        self.vector_store.add_documents(chunks)
+        self._save_hash()
 ```
 
 **Dependencies (`backend/app/core/dependencies.py`)**
@@ -608,10 +865,10 @@ Singleton pattern for service management:
 ```python
 _rag_service_instance = None
 
-def get_rag_service() -> RAGService:
+def get_rag_service() -> RAGPipelineService:
     global _rag_service_instance
     if _rag_service_instance is None:
-        _rag_service_instance = RAGService()
+        _rag_service_instance = RAGPipelineService()
     return _rag_service_instance
 ```
 
@@ -625,7 +882,7 @@ graph TD
     APP --> MESSAGES[Message List]
     MESSAGES --> MSG[ChatMessage.jsx]
     APP --> INPUT[ChatInput.jsx]
-    APP --> API[api.js]
+    APP --> API[api.service.js]
     
     style APP fill:#e3f2fd
     style API fill:#fff3e0

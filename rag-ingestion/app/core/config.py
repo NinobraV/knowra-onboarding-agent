@@ -1,0 +1,97 @@
+﻿"""
+Core configuration and settings for the RAG Ingestion Service.
+"""
+import os
+import json
+from pathlib import Path
+from typing import List
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+# Load environment variables from the project root
+env_path = Path(__file__).parent.parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+
+class Settings(BaseSettings):
+    """Application settings and configuration."""
+    
+    model_config = SettingsConfigDict(
+        env_file="../.env",
+        case_sensitive=True,
+        env_prefix="",
+        extra="ignore",  # Ignore extra fields from .env
+        json_schema_extra={"env_parse_none_str": ""}
+    )
+    
+    # Application
+    APP_NAME: str = "RAG Ingestion Service"
+    APP_VERSION: str = "1.0.0"
+    APP_DESCRIPTION: str = "Document ingestion, chunking, and vector store management"
+    
+    # Server
+    HOST: str = "0.0.0.0"
+    PORT: int = 8001
+    DEBUG: bool = False
+    
+    # CORS
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:8000"
+    ]
+    
+    @field_validator('ALLOWED_ORIGINS', mode='before')
+    @classmethod
+    def parse_allowed_origins(cls, v):
+        """Parse ALLOWED_ORIGINS from various formats."""
+        if isinstance(v, str):
+            # Handle empty string
+            if not v or v.strip() == "":
+                return ["http://localhost:5173", "http://localhost:3000", "http://localhost:8000"]
+            # Try JSON parsing first
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Fall back to comma-separated
+            return [origin.strip() for origin in v.split(',') if origin.strip()]
+        elif isinstance(v, list):
+            return v
+        return ["http://localhost:5173", "http://localhost:3000", "http://localhost:8000"]
+    
+    # OpenAI for Embeddings
+    OPENAI_API_KEY: str = ""
+    OPENAI_EMBEDDING_API_KEY: str = ""
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    
+    # Pinecone
+    PINECONE_API_KEY: str = ""
+    PINECONE_ENVIRONMENT: str = ""
+    PINECONE_INDEX_NAME: str = "knowra-onboarding"
+    
+    # Data Configuration
+    DATA_DIR: str = "../data/raw"
+    VECTOR_STORE_DIR: str = "./rag-ingestion/.vectorstore"
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 200
+    
+    # Document types supported
+    SUPPORTED_EXTENSIONS: List[str] = [".md", ".txt", ".pdf", ".docx"]
+
+
+# Global settings instance
+settings = Settings()
+
+
+def get_settings() -> Settings:
+    """
+    Get the global settings instance.
+    
+    Returns:
+        Settings: Application settings
+    """
+    return settings

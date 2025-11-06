@@ -1,0 +1,23 @@
+# FastAPI and server
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
+
+# LangChain for document processing
+langchain==0.3.13
+langchain-openai==0.2.10
+langchain-community==0.3.8
+langchain-core>=0.3.26,<0.4.0
+langchain-text-splitters>=0.3.3,<0.4.0
+
+# Vector store
+pinecone-client==5.0.1
+
+# OpenAI for embeddings
+openai==1.55.3
+pydantic-settings==2.4.0
+python-multipart==0.0.6
+
+# Testing
+pytest==7.4.3
+httpx==0.25.2

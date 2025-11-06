@@ -49,7 +49,7 @@ class VectorStoreService:
         self.pinecone_environment = pinecone_environment
         self.pinecone_index_name = pinecone_index_name
         self.data_dir = Path(data_dir) if data_dir else None
-        self.persist_dir = Path(persist_dir) if persist_dir else Path("./backend/.vectorstore")
+        self.persist_dir = Path(persist_dir) if persist_dir else Path("./rag-ingestion/.vectorstore")
         self.index = None
         
         # Ensure persist directory exists (for hash storage)
@@ -129,23 +129,33 @@ class VectorStoreService:
         """
         Check if vector store needs to be rebuilt.
         
-        Note: In the query-only backend, this always returns False.
-        Rebuilding is handled by the separate rag-ingestion service.
-        
         Returns:
-            bool: Always False for query-only service
+            bool: True if rebuild is needed
         """
         # Check if index is empty
         try:
             index = self.pc.Index(self.pinecone_index_name)
             stats = index.describe_index_stats()
             if stats.total_vector_count == 0:
-                print("⚠️  Warning: Vector store is empty. Run rag-ingestion service to populate it.")
-                return False  # Don't rebuild here, let ingestion service handle it
+                return True
         except Exception as e:
             print(f"⚠️  Could not check index stats: {e}")
+            return True
         
-        return False  # Always false - rebuilding is handled by rag-ingestion service
+        # Check if data directory is set for hash comparison
+        if not self.data_dir:
+            return False
+        
+        current_hash = self._calculate_files_hash()
+        stored_hash = self._get_stored_hash()
+        
+        return current_hash != stored_hash
+    
+    def clear_index(self) -> None:
+        """Clear all vectors from the Pinecone index."""
+        print(f"🗑️  Clearing Pinecone index: {self.pinecone_index_name}")
+        self.index.delete(delete_all=True)
+        print("✅ Index cleared")
     
     def create_vectorstore(self, documents: List[Document]) -> None:
         """
@@ -155,6 +165,9 @@ class VectorStoreService:
             documents: List of document chunks to vectorize
         """
         print(f"🔄 Creating Pinecone vector store in index: {self.pinecone_index_name}")
+        
+        # Clear existing vectors first
+        self.clear_index()
         
         # Prepare vectors for upsert
         vectors_to_upsert = []

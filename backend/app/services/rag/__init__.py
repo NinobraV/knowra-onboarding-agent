@@ -2,7 +2,6 @@
 RAG (Retrieval-Augmented Generation) Package
 
 Modular RAG implementation with separate services for:
-- Document chunking
 - Embedding generation
 - Vector store management
 - Semantic search
@@ -14,7 +13,6 @@ Main entry point: RAGPipelineService
 """
 
 from .rag_pipeline_service import RAGPipelineService
-from .chunking_service import ChunkingService
 from .embedding_service import EmbeddingService
 from .vector_store_service import VectorStoreService
 from .semantic_search_service import SemanticSearchService
@@ -23,7 +21,6 @@ from .llm_service import LLMService
 
 __all__ = [
     "RAGPipelineService",
-    "ChunkingService",
     "EmbeddingService",
     "VectorStoreService",
     "SemanticSearchService",

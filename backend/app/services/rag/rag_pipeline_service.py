@@ -1,11 +1,14 @@
 """
-RAG Pipeline Service - Orchestrates the complete RAG workflow.
+RAG Pipeline Service - Orchestrates the query and generation workflow.
 
 Responsibilities:
-- Coordinate all sub-services (chunking, embedding, vector store, search, ranking, LLM)
-- Provide unified interface for RAG operations
-- Manage initialization and rebuild workflows
+- Coordinate search, ranking, and LLM services (retrieval and generation only)
+- Provide unified interface for RAG query operations
 - Handle agent-based conversational interactions
+- Connect to pre-ingested vector store (managed by rag-ingestion service)
+
+Note: Document ingestion, chunking, and embedding are handled by the separate
+rag-ingestion service. This service focuses on query-time operations.
 """
 from pathlib import Path
 from typing import AsyncGenerator, Dict, Any, Optional
@@ -13,7 +16,6 @@ from typing import AsyncGenerator, Dict, Any, Optional
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import Tool
 
-from .chunking_service import ChunkingService
 from .embedding_service import EmbeddingService
 from .vector_store_service import VectorStoreService
 from .semantic_search_service import SemanticSearchService
@@ -23,14 +25,14 @@ from .llm_service import LLMService
 
 class RAGPipelineService:
     """
-    Orchestrator for the complete RAG (Retrieval-Augmented Generation) pipeline.
+    Orchestrator for RAG (Retrieval-Augmented Generation) query pipeline.
     
-    Coordinates all sub-services to provide:
-    - Document loading and chunking
-    - Vector store management with auto-rebuild
-    - Semantic search and ranking
+    Coordinates query-time sub-services to provide:
+    - Semantic search and ranking from pre-built vector store
     - Conversational agent with memory
     - Streaming and non-streaming responses
+    
+    Note: Vector store ingestion is handled by the separate rag-ingestion service.
     """
     
     def __init__(
@@ -52,18 +54,19 @@ class RAGPipelineService:
         memory_window: int = 10
     ):
         """
-        Initialize the RAG pipeline service with Pinecone.
+        Initialize the RAG pipeline service for query operations.
         
         Args:
-            data_dir: Directory containing markdown knowledge base files
-            persist_dir: Directory for hash storage (legacy)
+            data_dir: Directory containing markdown knowledge base files (for stats only)
+            persist_dir: Directory for hash storage (legacy, for compatibility)
+            openai_base_url: OpenAI API base URL
             openai_api_key: OpenAI API key for LLM
             embedding_api_key: API key for embedding service
             pinecone_api_key: Pinecone API key
             pinecone_environment: Pinecone environment/region
             pinecone_index_name: Pinecone index name
-            chunk_size: Size of text chunks
-            chunk_overlap: Overlap between chunks
+            chunk_size: Size of text chunks (for stats only)
+            chunk_overlap: Overlap between chunks (for stats only)
             embedding_model: Embedding model to use (default: text-embedding-3-small)
             llm_model: OpenAI LLM model
             llm_temperature: LLM temperature
@@ -75,13 +78,10 @@ class RAGPipelineService:
         self.openai_api_key = openai_api_key
         self.embedding_api_key = embedding_api_key
         self.retriever_k = retriever_k
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         
-        # Initialize sub-services
-        self.chunking_service = ChunkingService(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
-        )
-        
+        # Initialize query-time services only
         self.embedding_service = EmbeddingService(
             openai_api_key=embedding_api_key,
             model=embedding_model
@@ -92,7 +92,7 @@ class RAGPipelineService:
             pinecone_api_key=pinecone_api_key,
             pinecone_environment=pinecone_environment,
             pinecone_index_name=pinecone_index_name,
-            data_dir=self.data_dir,
+            data_dir=None,  # No data dir needed for query-only operations
             persist_dir=self.persist_dir
         )
         
@@ -120,25 +120,10 @@ class RAGPipelineService:
         self._initialize()
     
     def _initialize(self) -> None:
-        """Initialize or rebuild vector store and agent."""
-        if self.vector_store_service.should_rebuild():
-            print("🔨 Rebuilding vector store (files changed or missing)...")
-            self._build_vectorstore()
-        else:
-            print("✨ Vector store is up to date")
-            self.vector_store_service.load_vectorstore()
-        
+        """Initialize vector store connection and agent."""
+        print("✨ Connecting to Pinecone vector store...")
+        self.vector_store_service.load_vectorstore()
         self._create_agent()
-    
-    def _build_vectorstore(self) -> None:
-        """Build or rebuild the vector store from markdown files."""
-        print("🔄 Building vector store...")
-        
-        # Load and chunk documents
-        chunks = self.chunking_service.process(self.data_dir)
-        
-        # Create vector store
-        self.vector_store_service.create_vectorstore(chunks)
     
     def _create_agent(self) -> None:
         """Create the conversational agent with retriever tool using LangGraph."""
@@ -182,16 +167,13 @@ class RAGPipelineService:
     
     def rebuild_if_needed(self) -> bool:
         """
-        Check and rebuild vector store if files changed.
+        Check vector store status (ingestion is handled by rag-ingestion service).
         
         Returns:
-            bool: True if rebuild occurred
+            bool: Always False (no auto-rebuild in query service)
         """
-        if self.vector_store_service.should_rebuild():
-            print("🔄 Files changed, rebuilding vector store...")
-            self._build_vectorstore()
-            self._create_agent()
-            return True
+        # Note: Rebuilding is now handled by the separate rag-ingestion service
+        # This backend service focuses only on queries
         return False
     
     async def stream_response(self, query: str) -> AsyncGenerator[str, None]:
@@ -259,14 +241,14 @@ class RAGPipelineService:
         Returns:
             Dict[str, Any]: System statistics from all services
         """
-        doc_count = len(list(self.data_dir.glob("*.md")))
+        doc_count = len(list(self.data_dir.glob("*.md"))) if self.data_dir.exists() else 0
         
         return {
             "documents_loaded": doc_count,
-            "chunking": self.chunking_service.get_stats(),
             "embedding": self.embedding_service.get_stats(),
             "vector_store": self.vector_store_service.get_stats(),
             "search": self.search_service.get_stats(),
             "ranking": self.ranking_service.get_stats(),
-            "llm": self.llm_service.get_stats()
+            "llm": self.llm_service.get_stats(),
+            "note": "Document ingestion handled by rag-ingestion service"
         }
