@@ -35,7 +35,7 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 | **Backend** | FastAPI (Python 3.9+) | REST API with SSE streaming |
 | **Frontend** | React 18 + Vite 5 | Modern SPA with hooks |
 | **RAG Engine** | LangChain | Document processing & conversational agent |
-| **Vector DB** | ChromaDB | Local, persistent vector store |
+| **Vector DB** | Pinecone | Cloud-hosted vector store with auto-sync |
 | **LLM** | OpenAI GPT-4o-mini | Response generation |
 | **Embeddings** | text-embedding-3-small | Semantic search |
 | **Memory** | ConversationBufferWindowMemory | 10-message context window |
@@ -43,7 +43,7 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 ## ✨ Features
 
 - 🚀 **Streaming Responses**: Real-time SSE streaming with typing effect
-- 🧠 **RAG Pipeline**: ChromaDB vector store + OpenAI embeddings + LangChain agent
+- 🧠 **RAG Pipeline**: Pinecone vector store + OpenAI embeddings + LangChain agent
 - 🤖 **Intelligent Agent**: OpenAI tools agent with retriever and conversation memory
 - 🔄 **Auto-Rebuild**: SHA-256 hash-based change detection for automatic vector store updates
 - 💬 **Conversation History**: ConversationBufferWindowMemory maintains last 10 messages
@@ -52,6 +52,11 @@ An intelligent chatbot that answers questions from your knowledge base using cut
 - 🧹 **Clear History**: Reset conversation memory with one click
 - 🔐 **CORS Enabled**: Configured for frontend-backend communication
 - 📄 **Markdown Knowledge Base**: 9 comprehensive documentation files
+- ✂️ **Advanced Chunking**: Semantic-aware hierarchical splitting with quality scoring
+- 📝 **Rich Metadata**: Automatic frontmatter extraction and section tracking
+- 🎯 **Context Preservation**: Section headers prepended to chunks for better LLM understanding
+- 🧹 **Smart Post-Processing**: Automatic filtering of separator chunks and merging of short chunks
+- ☁️ **Cloud Vector Store**: Pinecone integration for scalable, managed vector search
 
 ## 🏗️ Architecture
 
@@ -78,8 +83,8 @@ graph TB
         LLM[ChatOpenAI<br/>gpt-4o-mini streaming]
     end
     
-    subgraph "Vector Store - ChromaDB"
-        CHROMA[Chroma Vector DB<br/>Persistent Storage]
+    subgraph "Vector Store - Pinecone"
+        PINECONE[Pinecone Vector DB<br/>Cloud-hosted]
         EMBED[OpenAI Embeddings<br/>text-embedding-3-small]
         HASH[SHA-256 Hash<br/>Change Detection]
     end
@@ -99,17 +104,17 @@ graph TB
     AGENT --> MEMORY
     AGENT --> TOOL
     AGENT --> LLM
-    TOOL --> CHROMA
-    CHROMA --> EMBED
-    CHROMA --> HASH
+    TOOL --> PINECONE
+    PINECONE --> EMBED
+    PINECONE --> HASH
     HASH --> MD
     MD --> SPLITTER
-    SPLITTER --> CHROMA
+    SPLITTER --> PINECONE
     
     style UI fill:#e3f2fd
     style ROUTES fill:#fff3e0
     style AGENT fill:#f3e5f5
-    style CHROMA fill:#e8f5e9
+    style PINECONE fill:#e8f5e9
     style MD fill:#fce4ec
 ```
 
@@ -123,7 +128,7 @@ sequenceDiagram
     participant RAG as RAG Service
     participant Agent as LangChain Agent
     participant Memory as Conversation Memory
-    participant Chroma as ChromaDB
+    participant Pinecone as Pinecone Vector DB
     participant OpenAI as OpenAI API
     
     User->>React: Type message & send
@@ -133,7 +138,7 @@ sequenceDiagram
     alt Files Changed
         RAG->>RAG: Calculate SHA-256 hash
         RAG->>RAG: Compare with stored hash
-        RAG->>Chroma: Rebuild vector store
+        RAG->>Pinecone: Rebuild vector store
     else No Changes
         RAG->>RAG: Use existing vector store
     end
@@ -141,11 +146,11 @@ sequenceDiagram
     FastAPI->>Agent: stream_response(query)
     Agent->>Memory: Load last 10 messages
     Agent->>Agent: Analyze query with context
-    Agent->>Chroma: knowledge_base_search(query, k=5)
-    Chroma->>OpenAI: Generate query embedding
-    OpenAI-->>Chroma: Return embedding vector
-    Chroma->>Chroma: Similarity search
-    Chroma-->>Agent: Return top 5 documents
+    Agent->>Pinecone: knowledge_base_search(query, k=5)
+    Pinecone->>OpenAI: Generate query embedding
+    OpenAI-->>Pinecone: Return embedding vector
+    Pinecone->>Pinecone: Similarity search
+    Pinecone-->>Agent: Return top 5 documents
     Agent->>OpenAI: Stream completion with context
     
     loop For each token
@@ -180,7 +185,7 @@ flowchart TD
     
     READ --> SPLIT[Split into chunks<br/>size=1000, overlap=200]
     SPLIT --> EMBED[Generate embeddings<br/>OpenAI API]
-    EMBED --> STORE[Store in ChromaDB]
+    EMBED --> STORE[Store in Pinecone]
     STORE --> SAVE_HASH[Save new hash]
     SAVE_HASH --> READY[Ready for queries]
     
@@ -245,15 +250,17 @@ graph LR
 flowchart LR
     START([Add/Edit MD file]) --> DETECT[SHA-256 Hash Detection]
     DETECT --> LOAD[Load Documents]
-    LOAD --> CHUNK[Chunk Documents<br/>RecursiveCharacterTextSplitter]
-    CHUNK --> EMBED[Generate Embeddings<br/>OpenAI API]
-    EMBED --> STORE[(ChromaDB<br/>Vector Store)]
-    STORE --> PERSIST[Persist to Disk]
-    PERSIST --> HASH_SAVE[Save Hash<br/>.content_hash]
+    LOAD --> CHUNK[Advanced Chunking<br/>Hierarchical + Post-processing]
+    CHUNK --> METADATA[Extract Metadata<br/>Frontmatter + Sections]
+    METADATA --> EMBED[Generate Embeddings<br/>OpenAI API]
+    EMBED --> STORE[(Pinecone<br/>Cloud Vector Store)]
+    STORE --> HASH_SAVE[Save Hash<br/>.content_hash]
     HASH_SAVE --> READY[✅ Ready]
     
     style START fill:#fff3e0
     style DETECT fill:#f3e5f5
+    style CHUNK fill:#e1bee7
+    style METADATA fill:#f8bbd0
     style STORE fill:#e8f5e9
     style READY fill:#c8e6c9
 ```
@@ -264,7 +271,8 @@ flowchart LR
 
 - Python 3.9+
 - Node.js 18+
-- OpenAI API Key
+- OpenAI API Key ([Get one here](https://platform.openai.com/api-keys))
+- Pinecone Account ([Sign up free](https://www.pinecone.io/))
 
 ### 1. Clone the Repository
 
@@ -273,7 +281,17 @@ git clone <repository-url>
 cd knowra-onboarding-agent
 ```
 
-### 2. Backend Setup
+### 2. Set Up Pinecone
+
+1. Create a free account at [Pinecone](https://www.pinecone.io/)
+2. Create a new index:
+   - **Index Name**: `knowra-onboarding`
+   - **Dimensions**: `1536` (for text-embedding-3-small)
+   - **Metric**: `cosine`
+   - **Region**: Choose your preferred region (e.g., `us-east-1-aws`)
+3. Get your API key from the Pinecone console
+
+### 3. Backend Setup
 
 ```bash
 # Navigate to backend directory
@@ -293,12 +311,15 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create .env file and add your OpenAI API key
+# Create .env file and add your API keys
 # Copy .env.example to .env and edit:
 # OPENAI_API_KEY=your_openai_api_key_here
+# PINECONE_API_KEY=your_pinecone_api_key_here
+# PINECONE_ENVIRONMENT=us-east-1-aws
+# PINECONE_INDEX_NAME=knowra-onboarding
 ```
 
-### 3. Frontend Setup
+### 4. Frontend Setup
 
 ```bash
 # Navigate to frontend directory (from root)
@@ -311,7 +332,7 @@ npm install
 # Default: VITE_API_URL=http://localhost:8000
 ```
 
-### 4. Run the Application
+### 5. Run the Application
 
 **Terminal 1 - Backend:**
 
@@ -327,7 +348,7 @@ cd frontend
 npm run dev
 ```
 
-### 5. Access the Application
+### 6. Access the Application
 
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
@@ -412,12 +433,29 @@ GET /api/health
 {
   "status": "healthy",
   "stats": {
-    "documents_loaded": 9,
-    "vector_store_path": "./backend/chroma_db",
-    "embedding_model": "text-embedding-3-small",
-    "llm_model": "gpt-4o-mini",
-    "memory_window": 10,
-    "last_hash": "a1b2c3d4"
+    "documents_loaded": 10,
+    "chunking": {
+      "chunk_size": 1000,
+      "chunk_overlap": 200,
+      "total_chunks": 715,
+      "avg_chunk_size": 847,
+      "quality_metrics": {
+        "avg_quality_score": 0.83,
+        "high_quality_chunks": 345,
+        "low_quality_chunks": 135
+      }
+    },
+    "vector_store": {
+      "type": "Pinecone",
+      "index_name": "knowra-onboarding",
+      "total_vectors": 715
+    },
+    "llm": {
+      "model": "gpt-4o-mini",
+      "temperature": 0.7,
+      "memory_window": 10
+    },
+    "embedding_model": "text-embedding-3-small"
   }
 }
 ```
@@ -496,6 +534,11 @@ POST /api/rebuild
 # OpenAI API Configuration (Required)
 OPENAI_API_KEY=your_openai_api_key_here
 
+# Pinecone Configuration (Required)
+PINECONE_API_KEY=your_pinecone_api_key_here
+PINECONE_ENVIRONMENT=your-environment  # e.g., us-east-1-aws
+PINECONE_INDEX_NAME=knowra-onboarding
+
 # Server Configuration
 HOST=0.0.0.0
 PORT=8000
@@ -506,11 +549,16 @@ ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
 
 # RAG Configuration
 DATA_DIR=./data/raw
-VECTOR_STORE_DIR=./backend/chroma_db
+VECTOR_STORE_DIR=./backend/.vectorstore  # For hash storage only
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
 RETRIEVER_K=5
 MEMORY_WINDOW=10
+AUTO_REBUILD_ENABLED=true  # Enable auto-rebuild on startup
+
+# Advanced Chunking Options
+CHUNK_ADD_SECTION_HEADERS=true  # Prepend section context to chunks
+CHUNK_EXTRACT_METADATA=true     # Extract frontmatter metadata
 
 # OpenAI Models
 OPENAI_MODEL=gpt-4o-mini
@@ -567,38 +615,125 @@ graph TD
 
 #### Key Components
 
+**Modular RAG Architecture**
+
+The RAG system is now built with a modular architecture for better maintainability and scalability:
+
+```
+backend/app/services/rag/
+├── chunking_service.py          # Document loading and intelligent chunking
+├── embedding_service.py          # OpenAI embedding generation
+├── vector_store_service.py       # Pinecone vector database management
+├── semantic_search_service.py    # Semantic search and retrieval
+├── ranking_service.py            # Result ranking and filtering
+├── llm_service.py                # LLM interaction and streaming
+└── rag_pipeline_service.py       # Orchestrator for all services
+```
+
+**ChunkingService** - Advanced document processing:
+
+```python
+class ChunkingService:
+    def __init__(
+        self,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+        add_section_headers: bool = True,
+        extract_metadata: bool = True
+    ):
+        # Hierarchical separators for semantic chunking
+        self.separators = [
+            "\n\n---\n\n",  # Document sections
+            "\n## ",         # H2 headers
+            "\n### ",        # H3 headers
+            "\n\n",          # Paragraphs
+            ". ",            # Sentences
+            " ", ""          # Words, Characters
+        ]
+    
+    def process(self, data_dir: Path) -> List[Document]:
+        """Load, chunk, and post-process documents"""
+        documents = self.load_documents(data_dir)
+        chunks = self.split_documents(documents)
+        # Post-processing: filter separators, merge short chunks
+        chunks = self._post_process_chunks(chunks)
+        return chunks
+```
+
+**VectorStoreService** - Pinecone integration:
+
+```python
+class VectorStoreService:
+    def __init__(
+        self,
+        embeddings,
+        pinecone_api_key: str,
+        pinecone_environment: str,
+        pinecone_index_name: str
+    ):
+        # Initialize Pinecone client
+        self.pc = Pinecone(api_key=pinecone_api_key)
+        self.index = self.pc.Index(pinecone_index_name)
+    
+    def should_rebuild(self) -> bool:
+        """Check if rebuild needed via SHA-256 hash"""
+        current_hash = self._calculate_hash()
+        return current_hash != self._get_stored_hash()
+```
+
+**RAGPipelineService** - Main orchestrator:
+
+```python
+class RAGPipelineService:
+    def __init__(self, ...):
+        # Initialize all sub-services
+        self.chunking_service = ChunkingService(...)
+        self.embedding_service = EmbeddingService(...)
+        self.vector_store_service = VectorStoreService(...)
+        self.search_service = SemanticSearchService(...)
+        self.ranking_service = RankingService(...)
+        self.llm_service = LLMService(...)
+        
+        # Create LangGraph agent with tools
+        self._create_agent()
+    
+    async def stream_response(self, query: str):
+        """Stream response from agent"""
+        async for chunk in self.agent_executor.astream(
+            {"messages": [("user", query)]}
+        ):
+            if "agent" in chunk:
+                yield chunk["agent"]["messages"][-1].content
+```
+
 **RAGService (`backend/app/services/rag_service.py`)**
 
-Core service managing the entire RAG pipeline:
+Backward-compatible wrapper around RAGPipelineService:
 
 ```python
 class RAGService:
-    def __init__(self):
-        # Initialize embeddings, LLM, memory
-        self.embeddings = OpenAIEmbeddings()
-        self.llm = ChatOpenAI(streaming=True)
-        self.memory = ConversationBufferWindowMemory(k=10)
-        self._initialize()
+    """Backward compatibility wrapper around RAGPipelineService"""
+    def __init__(self, data_dir, persist_dir, openai_api_key):
+        self._pipeline = RAGPipelineService(
+            data_dir=data_dir,
+            persist_dir=persist_dir,
+            openai_api_key=openai_api_key,
+            pinecone_api_key=settings.PINECONE_API_KEY,
+            pinecone_environment=settings.PINECONE_ENVIRONMENT,
+            pinecone_index_name=settings.PINECONE_INDEX_NAME,
+            chunk_add_section_headers=settings.CHUNK_ADD_SECTION_HEADERS,
+            chunk_extract_metadata=settings.CHUNK_EXTRACT_METADATA,
+            # ... other settings
+        )
     
-    def _initialize(self):
-        """Build or load vector store"""
-        if self._should_rebuild():
-            self._build_vectorstore()
-        else:
-            self._load_vectorstore()
-        self._create_agent()
-    
-    def _should_rebuild(self) -> bool:
-        """Check if files changed using SHA-256"""
-        current_hash = self._calculate_files_hash()
-        stored_hash = self._get_stored_hash()
-        return current_hash != stored_hash
+    def rebuild_if_needed(self) -> bool:
+        """Check and rebuild if files changed"""
+        return self._pipeline.rebuild_if_needed()
     
     async def stream_response(self, query: str):
-        """Stream response chunks"""
-        async for chunk in self.agent_executor.astream({"input": query}):
-            if "output" in chunk:
-                yield chunk["output"]
+        """Stream response from agent"""
+        async for chunk in self._pipeline.stream_response(query):
+            yield chunk
 ```
 
 **Dependencies (`backend/app/core/dependencies.py`)**

@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 200
     RETRIEVER_K: int = 5
     MEMORY_WINDOW: int = 10
+    AUTO_REBUILD_ENABLED: bool = True  # Disable auto-rebuild on startup and chat
+    
+    # Advanced Chunking Options
+    CHUNK_ADD_SECTION_HEADERS: bool = True  # Prepend section context to chunks
+    CHUNK_EXTRACT_METADATA: bool = True     # Extract frontmatter and metadata
     
     # SSE Streaming
     SSE_DELAY: float = 0.01
