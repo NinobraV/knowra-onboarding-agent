@@ -1,47 +1,36 @@
 /**
  * StatusBar Component
- * Displays health status and action buttons
+ * Displays health status and action indicators
  */
 
 import PropTypes from 'prop-types';
 
-const StatusBar = ({
-  healthStatus,
-  showClearButton,
-  onClearHistory,
-  isLoading,
-}) => {
-  return (
-    <div className="status-bar" role="status">
-      {/* Health Status Indicator */}
-      {healthStatus && (
-        <div className="health-status">
-          <span 
-            className="status-indicator healthy" 
-            aria-label="Connected to server"
-          >
-            ●
-          </span>
-          <span>Connected</span>
-          {healthStatus.stats && (
-            <span className="stats-info">
-              | {healthStatus.stats.documents_loaded} docs loaded
-            </span>
-          )}
-        </div>
-      )}
+const StatusBar = ({ healthStatus, isLoading }) => {
+  const isHealthy = Boolean(healthStatus && healthStatus.status === 'healthy');
 
-      {/* Clear History Button */}
-      {showClearButton && (
-        <button
-          onClick={onClearHistory}
-          className="clear-button"
-          disabled={isLoading}
-          aria-label="Clear conversation history"
+  return (
+    <div className="status-bar" role="status" aria-live="polite">
+      {/* Health Status Indicator */}
+      <div className="health-status" title={isHealthy ? 'Connected' : 'Disconnected'}>
+        <span
+          className={`status-indicator ${isHealthy ? 'healthy' : 'unhealthy'}`}
+          aria-hidden="true"
         >
-          🗑️ Clear History
-        </button>
-      )}
+          ●
+        </span>
+        <span className="small-muted" style={{ marginLeft: 8 }}>
+          {isHealthy ? 'Connected' : 'Disconnected'}
+        </span>
+
+        {isLoading && (
+          <span className="small-muted" style={{ marginLeft: 12 }}>
+            Processing…
+          </span>
+        )}
+      </div>
+
+      {/* Right-side placeholder kept minimal for layout consistency */}
+      <div aria-hidden="true" style={{ width: 1 }} />
     </div>
   );
 };
@@ -49,19 +38,13 @@ const StatusBar = ({
 StatusBar.propTypes = {
   healthStatus: PropTypes.shape({
     status: PropTypes.string,
-    stats: PropTypes.shape({
-      documents_loaded: PropTypes.number,
-    }),
+    stats: PropTypes.object,
   }),
-  showClearButton: PropTypes.bool,
-  onClearHistory: PropTypes.func,
   isLoading: PropTypes.bool,
 };
 
 StatusBar.defaultProps = {
   healthStatus: null,
-  showClearButton: false,
-  onClearHistory: () => {},
   isLoading: false,
 };
 
