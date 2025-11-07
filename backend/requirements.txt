@@ -2,20 +2,22 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 python-dotenv==1.0.1
+scikit-learn==1.7.2 # For PCA
 
 # LangChain and RAG
-langchain==0.3.9
+langchain==0.3.13
 langchain-openai==0.2.10
 langchain-community==0.3.8
-langchain-core==0.3.21
-scikit-learn==1.7.2 # For PCA
+langchain-core>=0.3.26,<0.4.0
+langsmith>=0.1.125,<0.4.0
+langgraph==0.2.40
 
 # Vector store
 pinecone-client==5.0.1
 
 # OpenAI
 openai==1.55.3
-pydantic-settings==2.1.0
+pydantic-settings==2.4.0
 python-multipart==0.0.6
 
 # Testing
