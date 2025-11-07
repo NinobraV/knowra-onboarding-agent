@@ -1,99 +1,150 @@
+# semantic_search_service.py
 """
 Semantic Search Service - Coordinates search operations.
 
 Responsibilities:
 - Execute semantic searches using vector store
 - Provide high-level search interface
-- Handle query processing and result formatting
+- Handle query processing, score filtering and result formatting
 """
-from typing import List
+
+import logging
+from typing import List, Tuple, Optional, Dict, Any
 
 from langchain_core.documents import Document
 
 from .vector_store_service import VectorStoreService
 
+logger = logging.getLogger("semantic_search_service")
+if not logger.handlers:
+    import sys
+    ch = logging.StreamHandler(sys.stdout)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+logger.setLevel("INFO")
+
 
 class SemanticSearchService:
     """
     Service for coordinating semantic search operations.
-    
-    Provides a high-level interface for searching the knowledge base
-    using the vector store's similarity search capabilities.
+
+    Wraps a VectorStoreService (Pinecone/FAISS/etc.) and exposes:
+    - semantic_search(query, k, score_threshold, namespace) -> List[Document]
+    - semantic_search_with_scores(query, k, namespace) -> List[(Document, score)]
+    - get_retriever(k, search_type) to return lightweight retriever metadata
     """
-    
+
     def __init__(self, vector_store_service: VectorStoreService):
-        """
-        Initialize the semantic search service.
-        
-        Args:
-            vector_store_service: Vector store service instance
-        """
         self.vector_store_service = vector_store_service
-    
+
     def semantic_search(
         self,
         query: str,
         k: int = 5,
-        score_threshold: float = 0.0
+        score_threshold: float = 0.0,
+        namespace: Optional[str] = None
     ) -> List[Document]:
         """
-        Perform semantic search on the knowledge base.
-        
+        Perform semantic search and return Documents passing score_threshold.
+
         Args:
-            query: Search query text
-            k: Number of documents to retrieve
-            score_threshold: Minimum similarity score (0.0 to 1.0)
-            
+            query: Query text
+            k: number of results to return
+            score_threshold: minimum score (lower = less similar for cosine depending on store)
+            namespace: optional Pinecone namespace (e.g., "memory" for long-term memory)
+
         Returns:
-            List[Document]: Most relevant documents
+            List[Document]: matching Documents ordered by score descending
         """
-        results = self.vector_store_service.similarity_search(query, k=k)
-        
-        # TODO: Implement score filtering when score_threshold > 0.0
-        # Note: Pinecone similarity_search returns top-k most similar documents
-        # For score-based filtering, use similarity_search_with_score
-        
-        return results
-    
-    def search_with_scores(self, query: str, k: int = 5) -> List[tuple]:
+        try:
+            # Use vector_store_service.semantic_search which returns Documents without scores
+            # For score filtering we use search_by_vector to get scores.
+            emb_fn = getattr(self.vector_store_service.embeddings, "embed_query", None) or getattr(self.vector_store_service.embeddings, "embed_text", None)
+            if not emb_fn:
+                # fallback to vector_store_service.semantic_search if embedding not available
+                docs = self.vector_store_service.semantic_search(query, k=k, namespace=namespace)
+                # No scores available; return as-is
+                return docs
+
+            query_vec = emb_fn(query)
+            results = self.vector_store_service.search_by_vector(query_vec, k=k, namespace=namespace)
+
+            docs: List[Document] = []
+            for r in results:
+                score = r.get("score", None)
+                # If score is present and below threshold, skip it
+                if score is not None and score < score_threshold:
+                    continue
+                text = r.get("text", "") or ""
+                metadata = r.get("metadata", {}) or {}
+                # Reattach score into metadata for downstream usage
+                if score is not None:
+                    metadata = dict(metadata)
+                    metadata["_score"] = score
+                docs.append(Document(page_content=text, metadata=metadata))
+            return docs
+        except Exception as e:
+            logger.exception("semantic_search failed: %s", e)
+            return []
+
+    def semantic_search_with_scores(
+        self,
+        query: str,
+        k: int = 5,
+        namespace: Optional[str] = None
+    ) -> List[Tuple[Document, float]]:
         """
-        Perform semantic search with relevance scores.
-        
+        Return list of (Document, score) tuples for a query.
+
         Args:
-            query: Search query text
-            k: Number of documents to retrieve
-            
+            query: Query text
+            k: number of results
+            namespace: optional namespace to search (e.g., "memory")
+
         Returns:
-            List[tuple]: List of (document, score) tuples
+            List[Tuple[Document, float]]
         """
-        if not self.vector_store_service.vectorstore:
-            raise ValueError("Vector store not initialized")
-        
-        return self.vector_store_service.vectorstore.similarity_search_with_score(
-            query, k=k
-        )
-    
-    def get_retriever(self, k: int = 5, search_type: str = "similarity"):
+        try:
+            emb_fn = getattr(self.vector_store_service.embeddings, "embed_query", None) or getattr(self.vector_store_service.embeddings, "embed_text", None)
+            if not emb_fn:
+                # If embeddings not available, try semantic_search (no scores)
+                docs = self.vector_store_service.semantic_search(query, k=k, namespace=namespace)
+                return [(d, 0.0) for d in docs]
+
+            query_vec = emb_fn(query)
+            results = self.vector_store_service.search_by_vector(query_vec, k=k, namespace=namespace)
+            out: List[Tuple[Document, float]] = []
+            for r in results:
+                score = r.get("score", 0.0)
+                text = r.get("text", "") or ""
+                metadata = r.get("metadata", {}) or {}
+                doc = Document(page_content=text, metadata=metadata)
+                out.append((doc, score))
+            return out
+        except Exception as e:
+            logger.exception("semantic_search_with_scores failed: %s", e)
+            return []
+
+    def get_retriever(self, k: int = 5, search_type: str = "similarity") -> Dict[str, Any]:
         """
-        Get a retriever for use in LangChain agents/chains.
-        
-        Args:
-            k: Number of documents to retrieve
-            search_type: Type of search ("similarity" or "mmr")
-            
+        Return a lightweight retriever configuration that can be passed to an agent.
+
+        This does not return a full LangChain Retriever object but provides the necessary
+        configuration; adapt as needed for LangChain integration.
+
         Returns:
-            Retriever: LangChain retriever instance
+            dict: {"index_name": ..., "k": k, "search_type": search_type}
         """
-        return self.vector_store_service.get_retriever(k=k, search_type=search_type)
-    
-    def get_stats(self) -> dict:
-        """
-        Get search service statistics.
-        
-        Returns:
-            dict: Service statistics
-        """
-        return {
-            "search_backend": "Pinecone",
-            "search_algorithm": "cosine_similarity"
-        }
+        try:
+            return self.vector_store_service.get_retriever(k=k, search_type=search_type)
+        except Exception as e:
+            logger.exception("get_retriever failed: %s", e)
+            return {"index_name": getattr(self.vector_store_service, "pinecone_index_name", None), "k": k, "search_type": search_type}
+
+    def get_stats(self) -> Dict[str, Any]:
+        try:
+            stats = self.vector_store_service.get_stats()
+            return {"backend": "pinecone", "vector_store_stats": stats}
+        except Exception:
+            return {"backend": "pinecone", "vector_store_stats": {}}

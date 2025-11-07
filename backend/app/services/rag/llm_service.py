@@ -1,13 +1,23 @@
-# llm_service.py (upgraded)
+"""
+llm_service.py
+
+Upgraded LLM service that:
+- Wraps an underlying LLM client via an adapter (swappable)
+- Supports sync and async streaming generation
+- Keeps per-session short-term memory persisted in Redis or in-process
+- Exposes a simple retriever/memory integration hook
+- Moderation hook, prompt building, token limit enforcement, metrics
+- Public API methods remain: generate_answer, generate_answer_stream, get_llm_instance, clear_memory, get_stats
+"""
+
 import os
 import time
 import logging
 import asyncio
 from typing import List, Optional, AsyncGenerator, Callable, Any, Dict
-from contextlib import asynccontextmanager
+from datetime import datetime
 
-# External libs (install as needed)
-# pip install redis backoff prometheus-client
+# Optional dependencies (best-effort imports)
 try:
     import redis
 except Exception:
@@ -19,19 +29,28 @@ except Exception:
     Counter = None
     Histogram = None
 
-# Placeholders for LangChain/OpenAI wrappers used previously
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+# Placeholder imports for ChatOpenAI and LangChain-like message/document types.
+# Replace these imports with your project's concrete wrappers if names differ.
+try:
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    from langchain_core.documents import Document
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+except Exception:
+    # Minimal placeholders so the module can be imported for static checks.
+    ChatOpenAI = object
+    HumanMessage = dict
+    AIMessage = dict
+    SystemMessage = dict
+    Document = dict
+    ChatPromptTemplate = None
+    MessagesPlaceholder = None
 
-# --- Logger setup ---
+# --- Logger ---
 logger = logging.getLogger("llm_service")
 if not logger.handlers:
     handler = logging.StreamHandler()
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)s [%(name)s] %(message)s"
-    )
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
     handler.setFormatter(fmt)
     logger.addHandler(handler)
 logger.setLevel(os.getenv("LLM_SERVICE_LOG_LEVEL", "INFO"))
@@ -40,9 +59,8 @@ logger.setLevel(os.getenv("LLM_SERVICE_LOG_LEVEL", "INFO"))
 REQUEST_COUNTER = Counter("llm_requests_total", "Total LLM requests") if Counter else None
 REQUEST_LATENCY = Histogram("llm_request_latency_seconds", "LLM request latency seconds") if Histogram else None
 
-# --- Simple token counting utility (placeholder) ---
+# --- Simple token utilities (replace with model tokenizer for production) ---
 def simple_token_count(text: str) -> int:
-    # TODO: replace with model-specific tokenizer (tiktoken)
     return len(text.split())
 
 def truncate_by_tokens(text: str, max_tokens: int) -> str:
@@ -51,7 +69,7 @@ def truncate_by_tokens(text: str, max_tokens: int) -> str:
         return text
     return " ".join(tokens[-max_tokens:])  # keep recent tokens
 
-# --- Retry decorator (synchronous) ---
+# --- Retry decorators ---
 def retry_on_exception(max_attempts=3, base_delay=0.5, exceptions=(Exception,)):
     def deco(fn):
         def wrapped(*args, **kwargs):
@@ -69,7 +87,6 @@ def retry_on_exception(max_attempts=3, base_delay=0.5, exceptions=(Exception,)):
         return wrapped
     return deco
 
-# --- Async retry decorator ---
 def aretry_on_exception(max_attempts=3, base_delay=0.5, exceptions=(Exception,)):
     def deco(fn):
         async def wrapped(*args, **kwargs):
@@ -94,7 +111,7 @@ class TransientAPIError(Exception):
 class ModerationError(Exception):
     pass
 
-# --- LLM Adapter Interface (keeps underlying llm swappable) ---
+# --- LLM Adapter Interface ---
 class BaseLLMAdapter:
     def invoke(self, prompt: str) -> Any:
         raise NotImplementedError
@@ -105,31 +122,31 @@ class BaseLLMAdapter:
     def get_model_name(self) -> str:
         raise NotImplementedError
 
-# --- Concrete adapter for ChatOpenAI used previously ---
+# --- Concrete ChatOpenAI Adapter ---
 class ChatOpenAIAdapter(BaseLLMAdapter):
     def __init__(self, llm_instance: ChatOpenAI):
         self.llm = llm_instance
 
     @retry_on_exception(max_attempts=3, base_delay=0.8, exceptions=(TransientAPIError, Exception))
     def invoke(self, prompt: str):
-        # Expect llm.invoke to return an object with .content
         try:
+            # adapt to your client's API; many clients accept message lists — here we pass raw prompt
             res = self.llm.invoke(prompt)
             return res
         except Exception as e:
-            # Map known transient errors if possible
+            logger.exception("LLM invoke error: %s", e)
             raise
 
     @aretry_on_exception(max_attempts=2, base_delay=0.5, exceptions=(TransientAPIError, Exception))
     async def astream(self, prompt: str):
-        # Expect llm.astream to be an async generator yielding chunk objects with .content
+        # expect self.llm.astream to be an async generator
         async for chunk in self.llm.astream(prompt):
             yield chunk
 
     def get_model_name(self) -> str:
         return getattr(self.llm, "model", "unknown")
 
-# --- Memory persistence optional (Redis-backed) ---
+# --- MemoryStore (Redis-backed optional, in-memory fallback) ---
 class MemoryStore:
     def __init__(self, redis_url: Optional[str] = None, prefix: str = "llm:mem:"):
         self.prefix = prefix
@@ -138,55 +155,113 @@ class MemoryStore:
         if redis_url and redis:
             try:
                 self._client = redis.from_url(redis_url, decode_responses=True)
+                # quick check
+                _ = self._client.ping()
                 self.enabled = True
             except Exception as e:
                 logger.warning("Redis init failed: %s. Falling back to in-memory store.", e)
                 self.enabled = False
-        self._in_memory = {}
+        self._in_memory: Dict[str, List[Dict]] = {}
 
     def _key(self, session_id: str) -> str:
         return f"{self.prefix}{session_id}"
 
     def get(self, session_id: str) -> List[Dict]:
         if self.enabled:
-            data = self._client.get(self._key(session_id))
-            if not data:
+            try:
+                data = self._client.get(self._key(session_id))
+                if not data:
+                    return []
+                import json
+                return json.loads(data)
+            except Exception as e:
+                logger.debug("Redis get failed: %s", e)
                 return []
-            import json
-            return json.loads(data)
         return self._in_memory.get(session_id, []).copy()
 
     def set(self, session_id: str, messages: List[Dict]) -> None:
         if self.enabled:
-            import json
-            self._client.set(self._key(session_id), json.dumps(messages))
+            try:
+                import json
+                self._client.set(self._key(session_id), json.dumps(messages))
+            except Exception as e:
+                logger.debug("Redis set failed: %s", e)
         else:
             self._in_memory[session_id] = messages.copy()
 
     def clear(self, session_id: str) -> None:
         if self.enabled:
-            self._client.delete(self._key(session_id))
+            try:
+                self._client.delete(self._key(session_id))
+            except Exception as e:
+                logger.debug("Redis delete failed: %s", e)
         else:
             self._in_memory.pop(session_id, None)
 
-# --- Moderation hook (placeholder) ---
+# --- Moderation hook (simple) ---
 def moderate_text(text: str) -> bool:
-    # TODO: integrate with real moderation API; return True if allowed, False if blocked
     blocked_terms = os.getenv("LLM_BLOCKED_TERMS", "").split(",")
     for t in blocked_terms:
         if t and t.strip().lower() in text.lower():
             return False
     return True
 
-# --- Vector retrieval hook (placeholder) ---
+# --- Default retriever placeholder ---
 def default_retriever(query: str, k: int = 5) -> List[Document]:
-    # TODO: integrate with real vector DB and reranker
     return []
 
-# --- Main LLMService class (public API unchanged) ---
+# --- Conversation Memory (lightweight short-term + vector hooks handled elsewhere) ---
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+class ConversationMemoryLight:
+    """
+    Lightweight short-term memory used to assemble prompts and persist via MemoryStore.
+    Long-term vector memory should be implemented in vector store service separately.
+    """
+    def __init__(self, memory_store: MemoryStore, session_id_getter: Callable[[], str], window: int = 10):
+        self.memory_store = memory_store
+        self.session_id_getter = session_id_getter
+        self.window = window
+
+    def append(self, role: str, content: str) -> None:
+        session_id = self._get_session_id()
+        entry = {"role": role, "content": content, "timestamp": _now_iso()}
+        # in-process history not stored separately here; MemoryStore is source of truth
+        try:
+            existing = self.memory_store.get(session_id) or []
+            existing.append(entry)
+            # cap to window
+            if len(existing) > self.window:
+                existing = existing[-self.window:]
+            self.memory_store.set(session_id, existing)
+        except Exception as e:
+            logger.debug("Memory append failed: %s", e)
+
+    def get_recent(self) -> List[Dict]:
+        session_id = self._get_session_id()
+        try:
+            return self.memory_store.get(session_id) or []
+        except Exception:
+            return []
+
+    def clear(self) -> None:
+        session_id = self._get_session_id()
+        try:
+            self.memory_store.clear(session_id)
+        except Exception as e:
+            logger.debug("Memory clear failed: %s", e)
+
+    def _get_session_id(self) -> str:
+        try:
+            return self.session_id_getter()
+        except Exception:
+            return "default-session"
+
+# --- Main LLMService ---
 class LLMService:
     """
-    Upgraded LLMService with improved robustness and extensibility while keeping public APIs.
+    Upgraded LLMService with memory persistence, adapter abstraction, streaming and moderation.
     """
 
     def __init__(
@@ -203,115 +278,79 @@ class LLMService:
         retriever: Optional[Callable[[str, int], List[Document]]] = None,
         moderation_hook: Optional[Callable[[str], bool]] = None
     ):
-        """
-        Keep constructor signature compatible but add optional integrations.
-        session_id_getter: callable returning a session/user identifier for per-session memory persistence.
-        retriever: function(query, k) -> List[Document]
-        moderation_hook: function(text)->bool
-        """
-        # basic config
         self.model = model
         self.temperature = temperature
         self.memory_window = memory_window
         self.max_prompt_tokens = max_prompt_tokens
+        self.streaming = streaming
 
-        # Validate env-based API key usage
         if not openai_api_key:
-            raise ValueError("openai_api_key must be provided via env or parameter")
+            raise ValueError("openai_api_key must be provided")
         self.openai_api_key = openai_api_key
         self.open_ai_base_url = open_ai_base_url
 
-        # Initialize underlying llm instance as before
-        self.llm = ChatOpenAI(
-            base_url=self.open_ai_base_url,
-            model=self.model,
-            temperature=self.temperature,
-            streaming=streaming,
-            openai_api_key=self.openai_api_key
-        )
-        self.adapter = ChatOpenAIAdapter(self.llm)
+        # Underlying LLM client
+        try:
+            self.llm = ChatOpenAI(
+                base_url=self.open_ai_base_url,
+                model=self.model,
+                temperature=self.temperature,
+                streaming=self.streaming,
+                openai_api_key=self.openai_api_key
+            )
+            self.adapter = ChatOpenAIAdapter(self.llm)
+        except Exception:
+            # Allow construction without concrete ChatOpenAI during static checks
+            self.llm = None
+            self.adapter = None
 
-        # in-memory chat history (default, per-process)
-        self.chat_history: List[Dict] = []
-
-        # memory persistence
+        # Memory persistence store (Redis optional)
         self.memory_store = MemoryStore(redis_url=redis_url)
         self.session_id_getter = session_id_getter or (lambda: "default-session")
 
-        # retriever and moderation
+        # Conversation memory helper
+        self.memory = ConversationMemoryLight(self.memory_store, session_id_getter=self.session_id_getter, window=memory_window)
+
+        # Retriever for RAG (documents or memory). Provide external retriever if needed.
         self.retriever = retriever or default_retriever
+
+        # Moderation hook
         self.moderation_hook = moderation_hook or moderate_text
 
-        # streaming control
+        # local short-term chat history for quick access (mirrors persisted store)
+        self.chat_history: List[Dict] = []
+
+        # track active async streams per session/task
         self._active_stream_tasks: Dict[str, asyncio.Task] = {}
 
-        logger.info("LLMService initialized: model=%s, streaming=%s", self.model, streaming)
+        logger.info("LLMService initialized model=%s streaming=%s memory_window=%d", self.model, self.streaming, self.memory_window)
 
-    # --- Prompt building (unchanged API) ---
-    def build_prompt(
-        self,
-        system_message: Optional[str] = None
-    ) -> ChatPromptTemplate:
-        """
-        Build a chat prompt template with system message and memory.
-        
-        Args:
-            system_message: Optional custom system message
-            
-        Returns:
-            ChatPromptTemplate: Configured prompt template
-        """
-        default_system = """You are a helpful AI assistant with access to a comprehensive knowledge base.
-
-Your role is to:
-- Answer questions based on the knowledge base using the search tool
-- Provide accurate, detailed, and well-structured responses
-- If the user, use the wrong syntax word, try to find the word have the same meaning about 80% and repeat with the correct word
-- Cite sources when possible
-- Be conversational and helpful
-- Show the whitelist tool of project in Whitelist
-- Answer the question base on the asker role in project
-- Try to summarize all the knowledge you know and answer in an human answer, do not you to must syntax.
-- If you don't find relevant information, say so honestly
-
-Always use the knowledge_base_search tool to find relevant information before answering."""
+    # --- Prompt builders ---
+    def build_prompt(self, system_message: Optional[str] = None) -> Any:
+        default_system = (
+            "You are a helpful AI assistant with access to a knowledge base and conversation memory.\n"
+            "Use conversation history and retrieved documents to answer clearly and concisely."
+        )
         system = system_message or default_system
+        if ChatPromptTemplate:
+            try:
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", system),
+                    MessagesPlaceholder(variable_name="chat_history", optional=True),
+                    ("human", "{input}"),
+                    MessagesPlaceholder(variable_name="agent_scratchpad")
+                ])
+                return prompt
+            except Exception:
+                return system
+        return system
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad")
-        ])
-        return prompt
-
-    def build_context_prompt(
-        self,
-        query: str,
-        context_docs: List[Document]
-    ) -> str:
-        """
-        Build a prompt with retrieved context for non-agent workflows.
-        
-        Args:
-            query: User query
-            context_docs: Retrieved documents for context
-            
-        Returns:
-            str: Formatted prompt with context
-        """
+    def build_context_prompt(self, query: str, context_docs: List[Document]) -> str:
         context = "\n\n".join([
-            f"Source: {doc.metadata.get('source', 'Unknown')}\n{doc.page_content}"
+            f"Source: {getattr(doc, 'metadata', {}).get('source', 'Unknown')}\n{getattr(doc, 'page_content', str(doc))}"
             for doc in context_docs
         ])
-        prompt = f"""Based on the following context, answer the question.
-
-Context:
-{context}
-
-Question: {query}
-
-Answer:"""
+        prompt = f"Based on the following context, answer the question.\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
         return prompt
 
     # --- Internal helpers ---
@@ -324,13 +363,13 @@ Answer:"""
     def _append_memory(self, role: str, content: str) -> None:
         session_id = self._get_session_id()
         entry = {"role": role, "content": content, "timestamp": time.time()}
+        # local history
         self.chat_history.append(entry)
-        # respect memory window
         if len(self.chat_history) > self.memory_window:
             self.chat_history = self.chat_history[-self.memory_window:]
-        # persist
+        # persist via MemoryStore
         try:
-            existing = self.memory_store.get(session_id)
+            existing = self.memory_store.get(session_id) or []
             existing.append(entry)
             if len(existing) > self.memory_window:
                 existing = existing[-self.memory_window:]
@@ -340,10 +379,11 @@ Answer:"""
 
     def _get_memory_messages(self) -> List[Dict]:
         session_id = self._get_session_id()
-        persisted = self.memory_store.get(session_id) or []
-        # Merge (persisted as source of truth)
-        # Keep in-memory for quick usage too
-        return persisted
+        try:
+            persisted = self.memory_store.get(session_id) or []
+            return persisted
+        except Exception:
+            return self.chat_history
 
     def _enforce_token_limit(self, prompt: str) -> str:
         prompt_tokens = simple_token_count(prompt)
@@ -352,29 +392,23 @@ Answer:"""
         logger.warning("Prompt tokens (%d) exceed max (%d). Truncating context.", prompt_tokens, self.max_prompt_tokens)
         return truncate_by_tokens(prompt, self.max_prompt_tokens)
 
-    # --- Moderation check ---
     def _moderate(self, text: str) -> None:
         allowed = self.moderation_hook(text)
         if not allowed:
             logger.warning("Content blocked by moderation.")
             raise ModerationError("Input blocked by moderation policy")
 
-    # --- Public API: generate non-streaming (keeps same signature) ---
-    def generate_answer(
-        self,
-        query: str,
-        context_docs: Optional[List[Document]] = None
-    ) -> str:
+    # --- Public API: generate non-streaming ---
+    def generate_answer(self, query: str, context_docs: Optional[List[Document]] = None) -> str:
         session_id = self._get_session_id()
         logger.info("generate_answer called, session=%s", session_id)
         if REQUEST_COUNTER:
             REQUEST_COUNTER.inc()
         start = time.time()
         try:
-            # moderation of input
+            # moderation
             self._moderate(query)
 
-            # If no explicit context docs, do retrieval (RAG)
             used_context = context_docs
             if not used_context:
                 try:
@@ -388,21 +422,21 @@ Answer:"""
             else:
                 prompt = query
 
-            # add memory to prompt if available
+            # prepend memory if exists
             memory_msgs = self._get_memory_messages()
             if memory_msgs:
                 mem_text = "\n".join([f"{m['role']}: {m['content']}" for m in memory_msgs])
                 prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
 
-            # enforce token limits
             prompt = self._enforce_token_limit(prompt)
 
-            # call llm (wrapped)
+            # call adapter
+            if not self.adapter:
+                raise RuntimeError("LLM adapter not initialized")
             res = self.adapter.invoke(prompt)
-            # Some adapters return object with .content; try to be robust
             content = getattr(res, "content", res if isinstance(res, str) else str(res))
 
-            # post-moderation of output
+            # post moderation
             if not self.moderation_hook(content):
                 raise ModerationError("Model output blocked by moderation")
 
@@ -415,18 +449,15 @@ Answer:"""
             if REQUEST_LATENCY:
                 REQUEST_LATENCY.observe(time.time() - start)
 
-    # --- Public API: streaming (keeps same signature) ---
-    async def generate_answer_stream(
-        self,
-        query: str,
-        context_docs: Optional[List[Document]] = None
-    ) -> AsyncGenerator[str, None]:
+    # --- Public API: streaming ---
+    async def generate_answer_stream(self, query: str, context_docs: Optional[List[Document]] = None) -> AsyncGenerator[str, None]:
         session_id = self._get_session_id()
         logger.info("generate_answer_stream called, session=%s", session_id)
         if REQUEST_COUNTER:
             REQUEST_COUNTER.inc()
         start = time.time()
-        # moderation of input
+
+        # moderation
         self._moderate(query)
 
         used_context = context_docs
@@ -449,37 +480,49 @@ Answer:"""
 
         prompt = self._enforce_token_limit(prompt)
 
-        # create a cancellation token via task tracking
+        # track this async task
         task = asyncio.current_task()
         task_id = f"{session_id}:{id(task)}"
         self._active_stream_tasks[task_id] = task
 
-        buffer = []
+        buffer: List[str] = []
         try:
-            async for chunk in self.adapter.astream(prompt):
-                # chunk may be object with .content or str
-                content = getattr(chunk, "content", chunk if isinstance(chunk, str) else str(chunk))
-                if not content:
-                    continue
-                # optionally post-moderate partial chunks (cheap heuristic)
-                if not self.moderation_hook(content):
-                    logger.warning("Stream chunk blocked by moderation. Cancelling stream.")
-                    raise ModerationError("Stream output blocked by moderation")
-                buffer.append(content)
-                yield content
-            # after stream completes, join and persist to memory
+            if not self.adapter:
+                raise RuntimeError("LLM adapter not initialized")
+            # attempt streaming via adapter
+            try:
+                async for chunk in self.adapter.astream(prompt):
+                    content = getattr(chunk, "content", None)
+                    if content is None:
+                        content = chunk if isinstance(chunk, str) else str(chunk)
+                    if not content:
+                        continue
+                    # optional partial moderation
+                    if not self.moderation_hook(content):
+                        logger.warning("Stream chunk blocked by moderation. Cancelling stream.")
+                        raise ModerationError("Stream output blocked by moderation")
+                    buffer.append(content)
+                    yield content
+            except AttributeError:
+                # adapter has no streaming; fallback to sync call
+                full = self.generate_answer(query, context_docs=context_docs)
+                buffer.append(full)
+                yield full
+                return
+            # after stream completes
             full = "".join(buffer)
             self._append_memory("user", query)
             self._append_memory("assistant", full)
+            yield ""  # optional sentinel (can be removed)
         finally:
             self._active_stream_tasks.pop(task_id, None)
             if REQUEST_LATENCY:
                 REQUEST_LATENCY.observe(time.time() - start)
 
-    # --- Allow external cancellation of active stream by session id (optional) ---
+    # --- Cancel streams for a session ---
     def cancel_streams_for_session(self, session_id: str) -> int:
         canceled = 0
-        keys = [k for k in self._active_stream_tasks.keys() if k.startswith(f"{session_id}:")]
+        keys = [k for k in list(self._active_stream_tasks.keys()) if k.startswith(f"{session_id}:")]
         for k in keys:
             t = self._active_stream_tasks.get(k)
             if t and not t.done():
@@ -487,12 +530,11 @@ Answer:"""
                 canceled += 1
         return canceled
 
-    # --- Public accessors (unchanged signatures) ---
+    # --- Public accessors ---
     def get_llm_instance(self) -> ChatOpenAI:
         return self.llm
 
     def get_memory_instance(self) -> List:
-        # return merged persisted memory for current session
         try:
             return self._get_memory_messages()
         except Exception:
@@ -507,7 +549,6 @@ Answer:"""
             logger.debug("Memory clear failed: %s", e)
 
     def get_stats(self) -> dict:
-        # We don't expose tokens by default for privacy, but include config
         return {
             "model": self.model,
             "temperature": self.temperature,
