@@ -57,7 +57,10 @@ class RAGService:
             llm_model=settings.OPENAI_MODEL,
             llm_temperature=settings.OPENAI_TEMPERATURE,
             retriever_k=settings.RETRIEVER_K,
-            memory_window=settings.MEMORY_WINDOW
+            memory_window=settings.MEMORY_WINDOW,
+            auto_rebuild=settings.AUTO_REBUILD_ENABLED,
+            chunk_add_section_headers=settings.CHUNK_ADD_SECTION_HEADERS,
+            chunk_extract_metadata=settings.CHUNK_EXTRACT_METADATA
         )
     
     def rebuild_if_needed(self) -> bool:

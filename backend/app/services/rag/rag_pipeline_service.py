@@ -49,7 +49,10 @@ class RAGPipelineService:
         llm_model: str = "gpt-4o-mini",
         llm_temperature: float = 0.7,
         retriever_k: int = 5,
-        memory_window: int = 10
+        memory_window: int = 10,
+        auto_rebuild: bool = False,
+        chunk_add_section_headers: bool = True,
+        chunk_extract_metadata: bool = True
     ):
         """
         Initialize the RAG pipeline service with Pinecone.
@@ -69,17 +72,23 @@ class RAGPipelineService:
             llm_temperature: LLM temperature
             retriever_k: Number of documents to retrieve
             memory_window: Conversation memory window size
+            auto_rebuild: Enable automatic rebuild on startup and chat (default: False)
+            chunk_add_section_headers: Add section context to chunks (default: True)
+            chunk_extract_metadata: Extract rich metadata from documents (default: True)
         """
         self.data_dir = Path(data_dir)
         self.persist_dir = Path(persist_dir)
         self.openai_api_key = openai_api_key
         self.embedding_api_key = embedding_api_key
         self.retriever_k = retriever_k
+        self.auto_rebuild = auto_rebuild
         
         # Initialize sub-services
         self.chunking_service = ChunkingService(
             chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
+            chunk_overlap=chunk_overlap,
+            add_section_headers=chunk_add_section_headers,
+            extract_metadata=chunk_extract_metadata
         )
         
         self.embedding_service = EmbeddingService(
@@ -121,11 +130,14 @@ class RAGPipelineService:
     
     def _initialize(self) -> None:
         """Initialize or rebuild vector store and agent."""
-        if self.vector_store_service.should_rebuild():
-            print("🔨 Rebuilding vector store (files changed or missing)...")
+        if self.auto_rebuild and self.vector_store_service.should_rebuild():
+            print("🔨 Auto-rebuild ENABLED - Rebuilding vector store (files changed or missing)...")
             self._build_vectorstore()
         else:
-            print("✨ Vector store is up to date")
+            if not self.auto_rebuild:
+                print("⚙️  Auto-rebuild DISABLED - Loading existing vector store from Pinecone...")
+            else:
+                print("✨ Vector store is up to date - Loading from Pinecone...")
             self.vector_store_service.load_vectorstore()
         
         self._create_agent()
@@ -182,11 +194,15 @@ class RAGPipelineService:
     
     def rebuild_if_needed(self) -> bool:
         """
-        Check and rebuild vector store if files changed.
+        Check and rebuild vector store if files changed (only if auto_rebuild is enabled).
         
         Returns:
             bool: True if rebuild occurred
         """
+        if not self.auto_rebuild:
+            print("⚙️  Auto-rebuild DISABLED - Skipping rebuild check")
+            return False
+            
         if self.vector_store_service.should_rebuild():
             print("🔄 Files changed, rebuilding vector store...")
             self._build_vectorstore()

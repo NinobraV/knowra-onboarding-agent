@@ -17,6 +17,19 @@ services:
       - PORT=8000
       - HOST=0.0.0.0
       - DATA_DIR=/app/data/raw
+      - VECTOR_STORE_DIR=/app/.vectorstore
+      - CHUNK_SIZE=1000                    # Size of text chunks (increase for larger context)
+      - CHUNK_OVERLAP=200                   # Overlap between chunks (preserves context)
+      - RETRIEVER_K=5                       # Number of documents to retrieve per query
+      - MEMORY_WINDOW=10                    # Number of messages to keep in conversation memory
+      - AUTO_REBUILD_ENABLED=false          # Auto-rebuild vector store when files change
+      
+      # ===== Optional: Advanced Chunking (improve context understanding) =====
+      - CHUNK_ADD_SECTION_HEADERS=true      # Prepend section headers to chunks
+      - CHUNK_EXTRACT_METADATA=true         # Extract YAML frontmatter metadata
+      
+      # ===== Optional: Streaming Configuration =====
+      - SSE_DELAY=0.01                      # Delay between streaming chunks (seconds)
     volumes:
       - ./backend:/app
       - ./data:/app/data

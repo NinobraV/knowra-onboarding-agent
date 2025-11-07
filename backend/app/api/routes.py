@@ -79,8 +79,8 @@ async def chat(request: ChatRequest):
     try:
         service = get_rag_service()
         
-        # Check for file changes and rebuild if needed
-        service.rebuild_if_needed()
+        # Note: Auto-rebuild is controlled by AUTO_REBUILD_ENABLED in config
+        # Manual rebuild available via POST /rebuild endpoint
         
         if request.stream:
             # Streaming response using SSE
