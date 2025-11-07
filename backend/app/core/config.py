@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
-    OPENAI_TEMPERATURE: float = 0.7
+    OPENAI_TEMPERATURE: float = 0
     PCA: int = 128
     
     # Pinecone

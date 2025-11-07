@@ -11,7 +11,7 @@ export const API_CONFIG = {
     HEALTH: '/api/health',
     REBUILD: '/api/rebuild',
   },
-  TIMEOUT: 30000, // 30 seconds
+  TIMEOUT: 45000, // 45 seconds
 };
 
 // Message roles
@@ -23,7 +23,7 @@ export const MESSAGE_ROLES = {
 
 // UI Constants
 export const UI_CONFIG = {
-  MAX_MESSAGE_LENGTH: 5000,
+  MAX_MESSAGE_LENGTH: 500,
   AUTO_SCROLL_BEHAVIOR: 'smooth',
   TEXTAREA_MIN_ROWS: 1,
   TEXTAREA_MAX_ROWS: 5,
