@@ -11,7 +11,7 @@ export const API_CONFIG = {
     HEALTH: '/api/health',
     REBUILD: '/api/rebuild',
   },
-  TIMEOUT: 30000, // 30 seconds
+  TIMEOUT: 45000, // 45 seconds
 };
 
 // Message roles
