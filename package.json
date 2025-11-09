@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "install-python-tools": "pip install black isort flake8",
+    "format-backend": "python -m black backend/",
+    "format-imports": "python -m isort backend/",
+    "format-all": "python -m isort backend/ && python -m black backend/",
+    "lint-backend": "python -m flake8 backend/"
+  }
+}
