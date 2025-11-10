@@ -86,7 +86,6 @@ class RAGPipelineService:
             chunk_add_section_headers: Add section context to chunks (default: True)
             chunk_extract_metadata: Extract rich metadata from documents (default: True)
         """
-        memory_window: int = 10,
         session_id_getter: Optional[callable] = None,
         self.data_dir = Path(data_dir)
         self.persist_dir = Path(persist_dir)
@@ -270,13 +269,28 @@ class RAGPipelineService:
         except Exception:
             kb_text = ""
 
-        parts = ["You are a helpful assistant. Use conversation history, relevant memory, and retrieved documents."]
+        # Build enhanced system prompt with structured sections
+        parts = [
+            "You are Knowra, an intelligent AI assistant with advanced contextual understanding and knowledge retrieval capabilities."
+        ]
+        
+        # Add contextual information with clear section headers
         if mem_text:
-            parts.append("Conversation history (recent):\n" + mem_text)
+            parts.append("## Recent Conversation Context\n" + mem_text)
         if relevant_text:
-            parts.append("Relevant long-term memory:\n" + relevant_text)
+            parts.append("## Relevant Historical Context\n" + relevant_text)
         if kb_text:
-            parts.append("Retrieved documents from KB:\n" + kb_text)
+            parts.append("## Knowledge Base References\n" + kb_text)
+        
+        # Add response guidelines
+        parts.extend([
+            "## Response Instructions",
+            "- Synthesize information from all available sources",
+            "- Provide accurate, well-structured responses",
+            "- Reference relevant context when applicable",
+            "- Maintain professional and helpful tone",
+            "- Ask for clarification if the query is ambiguous"
+        ])
 
         combined = "\n\n".join(parts)
         # Enforce token limit via llm_service helper if present, else a simple fallback

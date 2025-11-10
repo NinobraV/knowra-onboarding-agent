@@ -35,7 +35,7 @@ try:
     from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
     from langchain_core.documents import Document
-    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 except Exception:
     # Minimal placeholders so the module can be imported for static checks.
     ChatOpenAI = object
@@ -45,6 +45,7 @@ except Exception:
     Document = dict
     ChatPromptTemplate = None
     MessagesPlaceholder = None
+    PromptTemplate = None
 
 # --- Logger ---
 logger = logging.getLogger("llm_service")
@@ -328,8 +329,27 @@ class LLMService:
     # --- Prompt builders ---
     def build_prompt(self, system_message: Optional[str] = None) -> Any:
         default_system = (
-            "You are a helpful AI assistant with access to a knowledge base and conversation memory.\n"
-            "Use conversation history and retrieved documents to answer clearly and concisely."
+            "You are Knowra, an intelligent AI assistant with advanced knowledge retrieval and memory capabilities.\n\n"
+            "## Core Identity\n"
+            "- You are helpful, accurate, and professional\n"
+            "- You maintain context across conversations using memory\n"
+            "- You leverage knowledge base documents to provide informed responses\n\n"
+            "## Response Guidelines\n"
+            "1. **Clarity**: Provide clear, concise, and well-structured answers\n"
+            "2. **Accuracy**: Base responses on retrieved documents and conversation history\n"
+            "3. **Context Awareness**: Reference relevant previous discussions when applicable\n"
+            "4. **Knowledge Integration**: Synthesize information from multiple sources\n"
+            "5. **Transparency**: Acknowledge when using retrieved information or memory\n\n"
+            "## Capabilities\n"
+            "- Access to conversation history and long-term memory\n"
+            "- Knowledge base retrieval for accurate information\n"
+            "- Contextual understanding across multiple interactions\n"
+            "- Ability to reference and build upon previous discussions\n\n"
+            "## Response Format\n"
+            "- Use clear headings and bullet points when appropriate\n"
+            "- Provide step-by-step explanations for complex topics\n"
+            "- Include relevant context from memory or documents when helpful\n"
+            "- Ask clarifying questions when the request is ambiguous"
         )
         system = system_message or default_system
         if ChatPromptTemplate:
@@ -343,14 +363,80 @@ class LLMService:
                 return prompt
             except Exception:
                 return system
-        return system
+        return prompt
+
+    def build_specialized_prompt(self, query: str, prompt_type: str = "general") -> str:
+        """Build specialized prompts for different types of queries."""
+        
+        specialized_prompts = {
+            "general": (
+                "You are Knowra, an intelligent AI assistant. Provide helpful, accurate, "
+                "and well-structured responses based on the available context and memory."
+            ),
+            "technical": (
+                "You are Knowra, a technical expert AI assistant. Provide detailed, "
+                "accurate technical explanations with clear examples and step-by-step "
+                "guidance when appropriate. Include relevant code snippets, configurations, "
+                "or technical details when applicable."
+            ),
+            "analytical": (
+                "You are Knowra, an analytical AI assistant. Provide comprehensive analysis "
+                "with logical reasoning, data-driven insights, and balanced perspectives. "
+                "Break down complex problems into manageable components and provide "
+                "structured recommendations."
+            ),
+            "creative": (
+                "You are Knowra, a creative AI assistant. Provide innovative and "
+                "imaginative responses while maintaining relevance and usefulness. "
+                "Offer multiple perspectives and creative solutions when appropriate."
+            ),
+            "educational": (
+                "You are Knowra, an educational AI assistant. Provide clear, "
+                "comprehensive explanations suitable for learning. Use analogies, "
+                "examples, and progressive complexity to facilitate understanding. "
+                "Encourage critical thinking and provide additional resources when relevant."
+            )
+        }
+        
+        return specialized_prompts.get(prompt_type, specialized_prompts["general"])
 
     def build_context_prompt(self, query: str, context_docs: List[Document]) -> str:
-        context = "\n\n".join([
-            f"Source: {getattr(doc, 'metadata', {}).get('source', 'Unknown')}\n{getattr(doc, 'page_content', str(doc))}"
-            for doc in context_docs
-        ])
-        prompt = f"Based on the following context, answer the question.\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+        # Enhanced context formatting with better document structure
+        context_parts = []
+        for i, doc in enumerate(context_docs, 1):
+            source = getattr(doc, 'metadata', {}).get('source', 'Unknown')
+            content = getattr(doc, 'page_content', str(doc))
+            context_parts.append(f"### Document {i} (Source: {source})\n{content}")
+        
+        context = "\n\n".join(context_parts)
+        
+        # Use PromptTemplate to render the final context-aware prompt string
+        if PromptTemplate:
+            template = (
+                "Based on the following retrieved documents, please provide a comprehensive answer to the question.\n\n"
+                "## Retrieved Documents:\n{context}\n\n"
+                "## User Question:\n{question}\n\n"
+                "## Instructions:\n"
+                "- Synthesize information from all relevant documents\n"
+                "- Provide accurate and well-structured responses\n"
+                "- Reference specific documents when applicable\n"
+                "- If documents don't contain relevant information, clearly state so\n\n"
+                "## Answer:"
+            )
+            prompt = PromptTemplate.from_template(template).format(context=context, question=query)
+            return prompt
+        
+        prompt = (
+            f"Based on the following retrieved documents, please provide a comprehensive answer to the question.\n\n"
+            f"## Retrieved Documents:\n{context}\n\n"
+            f"## User Question:\n{query}\n\n"
+            f"## Instructions:\n"
+            f"- Synthesize information from all relevant documents\n"
+            f"- Provide accurate and well-structured responses\n"
+            f"- Reference specific documents when applicable\n"
+            f"- If documents don't contain relevant information, clearly state so\n\n"
+            f"## Answer:"
+        )
         return prompt
 
     # --- Internal helpers ---
@@ -422,11 +508,17 @@ class LLMService:
             else:
                 prompt = query
 
-            # prepend memory if exists
+            # prepend memory if exists (render via PromptTemplate)
             memory_msgs = self._get_memory_messages()
             if memory_msgs:
                 mem_text = "\n".join([f"{m['role']}: {m['content']}" for m in memory_msgs])
-                prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
+                if PromptTemplate:
+                    wrapper_template = PromptTemplate.from_template(
+                        "Conversation history:\n{history}\n\n{body}"
+                    )
+                    prompt = wrapper_template.format(history=mem_text, body=prompt)
+                else:
+                    prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
 
             prompt = self._enforce_token_limit(prompt)
 
@@ -476,7 +568,13 @@ class LLMService:
         memory_msgs = self._get_memory_messages()
         if memory_msgs:
             mem_text = "\n".join([f"{m['role']}: {m['content']}" for m in memory_msgs])
-            prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
+            if PromptTemplate:
+                wrapper_template = PromptTemplate.from_template(
+                    "Conversation history:\n{history}\n\n{body}"
+                )
+                prompt = wrapper_template.format(history=mem_text, body=prompt)
+            else:
+                prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
 
         prompt = self._enforce_token_limit(prompt)
 
