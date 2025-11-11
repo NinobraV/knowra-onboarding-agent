@@ -137,11 +137,25 @@ class ChatOpenAIAdapter(BaseLLMAdapter):
             logger.exception("LLM invoke error: %s", e)
             raise
 
-    @aretry_on_exception(max_attempts=2, base_delay=0.5, exceptions=(TransientAPIError, Exception))
     async def astream(self, prompt: str):
         # expect self.llm.astream to be an async generator
-        async for chunk in self.llm.astream(prompt):
-            yield chunk
+        # Manual retry logic for async generators
+        max_attempts = 2
+        base_delay = 0.5
+        attempts = 0
+        
+        while True:
+            try:
+                async for chunk in self.llm.astream(prompt):
+                    yield chunk
+                break  # Success, exit retry loop
+            except (TransientAPIError, Exception) as e:
+                attempts += 1
+                logger.warning("Async retryable error in astream: %s (attempt %d/%d)", e, attempts, max_attempts)
+                if attempts >= max_attempts:
+                    logger.exception("Max async retry attempts reached for astream")
+                    raise
+                await asyncio.sleep(base_delay * (2 ** (attempts - 1)))
 
     def get_model_name(self) -> str:
         return getattr(self.llm, "model", "unknown")
@@ -283,7 +297,6 @@ class LLMService:
         self.memory_window = memory_window
         self.max_prompt_tokens = max_prompt_tokens
         self.streaming = streaming
-
         if not openai_api_key:
             raise ValueError("openai_api_key must be provided")
         self.openai_api_key = openai_api_key
@@ -322,7 +335,7 @@ class LLMService:
 
         # track active async streams per session/task
         self._active_stream_tasks: Dict[str, asyncio.Task] = {}
-
+        print("self.memory_window", self.memory_window)
         logger.info("LLMService initialized model=%s streaming=%s memory_window=%d", self.model, self.streaming, self.memory_window)
 
     # --- Prompt builders ---
@@ -489,6 +502,7 @@ class LLMService:
         try:
             if not self.adapter:
                 raise RuntimeError("LLM adapter not initialized")
+            
             # attempt streaming via adapter
             try:
                 async for chunk in self.adapter.astream(prompt):
@@ -503,8 +517,9 @@ class LLMService:
                         raise ModerationError("Stream output blocked by moderation")
                     buffer.append(content)
                     yield content
-            except AttributeError:
-                # adapter has no streaming; fallback to sync call
+            except (AttributeError, RuntimeWarning) as e:
+                # adapter has no streaming or coroutine issues; fallback to sync call
+                logger.debug(f"Streaming failed ({e}), falling back to sync generation")
                 full = self.generate_answer(query, context_docs=context_docs)
                 buffer.append(full)
                 yield full

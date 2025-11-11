@@ -60,19 +60,27 @@ const fetchWithErrorHandling = async (endpoint, options = {}) => {
 /**
  * Send a chat message with streaming response
  * @param {string} message - User message
+ * @param {Object} options - Chat options
+ * @param {string} options.sessionId - Session ID
+ * @param {string} options.projectId - Project ID  
  * @param {Function} onChunk - Callback for each chunk received
  * @param {Function} onComplete - Callback when stream completes
  * @param {Function} onError - Callback for errors
+ * @param {Function} onMetadata - Callback for metadata (routing, safety info)
  * @returns {Promise<void>}
  */
-export const sendMessageStream = async (message, onChunk, onComplete, onError) => {
+export const sendMessageStream = async (message, options = {}, onChunk, onComplete, onError, onMetadata) => {
   try {
+    const requestBody = {
+      message,
+      stream: true,
+      session_id: options.sessionId,
+      project_id: options.projectId || 'default',
+    };
+
     const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.CHAT, {
       method: 'POST',
-      body: JSON.stringify({
-        message,
-        stream: true,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const reader = response.body.getReader();
@@ -104,6 +112,18 @@ export const sendMessageStream = async (message, onChunk, onComplete, onError) =
             return;
           }
 
+          // Handle metadata
+          if (data.startsWith('[METADATA]')) {
+            const metadataStr = data.slice('[METADATA]'.length);
+            try {
+              const metadata = JSON.parse(metadataStr);
+              if (onMetadata) onMetadata(metadata);
+            } catch (e) {
+              console.warn('Failed to parse metadata:', e);
+            }
+            continue;
+          }
+
           if (data) {
             // Parse JSON if the data is a JSON string
             try {
@@ -128,17 +148,24 @@ export const sendMessageStream = async (message, onChunk, onComplete, onError) =
 /**
  * Send a chat message without streaming (JSON response)
  * @param {string} message - User message
- * @returns {Promise<Object>} Response data containing answer and sources
+ * @param {Object} options - Chat options
+ * @param {string} options.sessionId - Session ID
+ * @param {string} options.projectId - Project ID
+ * @returns {Promise<Object>} Response data containing answer, sources, and metadata
  * @throws {Error} If request fails
  */
-export const sendMessage = async (message) => {
+export const sendMessage = async (message, options = {}) => {
   try {
+    const requestBody = {
+      message,
+      stream: false,
+      session_id: options.sessionId,
+      project_id: options.projectId || 'default',
+    };
+
     const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.CHAT, {
       method: 'POST',
-      body: JSON.stringify({
-        message,
-        stream: false,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     return await response.json();
@@ -150,18 +177,140 @@ export const sendMessage = async (message) => {
 
 /**
  * Clear conversation history
+ * @param {string} sessionId - Session ID to clear (optional)
  * @returns {Promise<Object>} Response data
  * @throws {Error} If request fails
  */
-export const clearHistory = async () => {
+export const clearHistory = async (sessionId = null) => {
   try {
-    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.CLEAR, {
+    const url = sessionId 
+      ? `${API_CONFIG.ENDPOINTS.CLEAR}?session_id=${sessionId}`
+      : API_CONFIG.ENDPOINTS.CLEAR;
+      
+    const response = await fetchWithErrorHandling(url, {
       method: 'POST',
     });
 
     return await response.json();
   } catch (error) {
     console.error('Clear history error:', error);
+    throw error;
+  }
+};
+
+// Session Management Functions
+
+/**
+ * Create a new conversation session
+ * @param {Object} sessionData - Session creation data
+ * @param {string} sessionData.userId - User identifier
+ * @param {string} sessionData.projectId - Project identifier
+ * @param {string} sessionData.sessionName - Human-readable session name
+ * @returns {Promise<Object>} Created session data
+ * @throws {Error} If request fails
+ */
+export const createSession = async (sessionData) => {
+  try {
+    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.SESSIONS, {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: sessionData.userId,
+        project_id: sessionData.projectId || 'default',
+        session_name: sessionData.sessionName || `Session ${new Date().toLocaleString()}`,
+      }),
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Create session error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get list of sessions with optional filtering
+ * @param {Object} filters - Optional filters
+ * @param {string} filters.userId - Filter by user ID
+ * @param {string} filters.projectId - Filter by project ID
+ * @param {number} filters.limit - Maximum number of sessions
+ * @returns {Promise<Object>} List of sessions
+ * @throws {Error} If request fails
+ */
+export const listSessions = async (filters = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (filters.userId) params.append('user_id', filters.userId);
+    if (filters.projectId) params.append('project_id', filters.projectId);
+    if (filters.limit) params.append('limit', filters.limit.toString());
+
+    const url = params.toString() 
+      ? `${API_CONFIG.ENDPOINTS.SESSIONS}?${params.toString()}`
+      : API_CONFIG.ENDPOINTS.SESSIONS;
+
+    const response = await fetchWithErrorHandling(url, {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('List sessions error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get information about a specific session
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<Object>} Session information
+ * @throws {Error} If request fails
+ */
+export const getSession = async (sessionId) => {
+  try {
+    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.SESSION_BY_ID(sessionId), {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get session error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a conversation session
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<Object>} Deletion confirmation
+ * @throws {Error} If request fails
+ */
+export const deleteSession = async (sessionId) => {
+  try {
+    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.SESSION_BY_ID(sessionId), {
+      method: 'DELETE',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Delete session error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get session statistics and memory usage
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<Object>} Session statistics
+ * @throws {Error} If request fails
+ */
+export const getSessionStats = async (sessionId) => {
+  try {
+    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.SESSION_STATS(sessionId), {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get session stats error:', error);
     throw error;
   }
 };
@@ -211,6 +360,12 @@ const apiService = {
   clearHistory,
   checkHealth,
   rebuildVectorStore,
+  // Session management
+  createSession,
+  listSessions,
+  getSession,
+  deleteSession,
+  getSessionStats,
 };
 
 export default apiService;

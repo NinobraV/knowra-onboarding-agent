@@ -86,7 +86,7 @@ class RAGPipelineService:
             chunk_add_section_headers: Add section context to chunks (default: True)
             chunk_extract_metadata: Extract rich metadata from documents (default: True)
         """
-        memory_window: int = 10,
+        # memory_window: int = 10,
         session_id_getter: Optional[callable] = None,
         self.data_dir = Path(data_dir)
         self.persist_dir = Path(persist_dir)

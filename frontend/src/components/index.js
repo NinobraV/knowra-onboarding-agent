@@ -10,3 +10,5 @@ export { default as StatusBar } from './StatusBar';
 export { default as ErrorBanner } from './ErrorBanner';
 export { default as MessageList } from './MessageList';
 export { default as WelcomeScreen } from './WelcomeScreen';
+export { default as SessionManager } from './SessionManager';
+export { default as MetadataDisplay } from './MetadataDisplay';

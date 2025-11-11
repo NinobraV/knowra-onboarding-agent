@@ -16,11 +16,24 @@ import asyncio
 import functools
 from sklearn.decomposition import PCA
 
-# Optional metrics
+# Optional monitoring
 try:
     from prometheus_client import Histogram, Counter
-except Exception:
-    Histogram = None
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    PROMETHEUS_AVAILABLE = False
+    # Create dummy classes if prometheus not available
+    class Counter:
+        def __init__(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            pass
+    
+    class Histogram:
+        def __init__(self, *args, **kwargs):
+            pass
+        def observe(self, *args, **kwargs):
+            pass
     Counter = None
 
 # Replace with your actual OpenAI embeddings wrapper import
@@ -198,7 +211,7 @@ class EmbeddingService:
         reduced_embedding = self.pca.transform(embedding_array)
         return reduced_embedding.flatten().tolist()
     
-    def get_embeddings_instance(self) -> OpenAIEmbeddings:
+    def get_embeddings_instance(self):
         """
         Get the underlying LangChain embeddings instance.
         
