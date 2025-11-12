@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build outputs
+build/
+dist/
+frontend/build/
+frontend/dist/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Backend files
+backend/
+*.py
+*.pyc
+
+# Other
+.git/
+.DS_Store
+coverage/

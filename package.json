@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "install-python-tools": "pip install black isort flake8",
+    "install-frontend-tools": "npm install --save-dev prettier",
+    "format-backend": "python -m black backend/",
+    "format-imports": "python -m isort backend/",
+    "format-all-backend": "python -m isort backend/ && python -m black backend/",
+    "lint-backend": "python -m flake8 backend/",
+    "format-frontend": "prettier --write \"frontend/**/*.{js,jsx,ts,tsx,json,css,scss,md}\"",
+    "format-frontend-check": "prettier --check \"frontend/**/*.{js,jsx,ts,tsx,json,css,scss,md}\"",
+    "format-all": "npm run format-all-backend && npm run format-frontend"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}
