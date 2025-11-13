@@ -1,10 +1,8 @@
 """
 API route definitions for the Knowledge Chatbot.
 """
-import asyncio
 import uuid
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from typing import Optional
 
 from app.models.schemas import (
@@ -69,14 +67,13 @@ async def health_check():
 @router.post("/api/chat")
 async def chat(request: ChatRequest):
     """
-    Chat endpoint with optional Server-Sent Events streaming.
+    Chat endpoint - returns complete response (non-streaming).
     
     Args:
-        request: Chat request with message, stream flag, and session info
+        request: Chat request with message and session info
         
     Returns:
-        StreamingResponse: If stream=True (SSE format)
-        ChatResponse: If stream=False (JSON format)
+        ChatResponse: Complete JSON response with metadata
         
     Raises:
         HTTPException: If chat processing fails
@@ -93,60 +90,21 @@ async def chat(request: ChatRequest):
         # Note: Auto-rebuild is controlled by AUTO_REBUILD_ENABLED in config
         # Manual rebuild available via POST /rebuild endpoint
         
-        if request.stream:
-            # Streaming response using SSE
-            async def event_generator():
-                """Generate Server-Sent Events."""
-                try:
-                    async for chunk in service.stream_response(
-                        request.message, 
-                        session_id=session_id,
-                        project_id=request.project_id
-                    ):
-                        if chunk:
-                            # SSE format: data: <content>\n\n
-                            yield f"data: {chunk}\n\n"
-                            await asyncio.sleep(settings.SSE_DELAY)
-                    
-                    # Send end signal with metadata
-                    metadata = {
-                        "session_id": session_id,
-                        "project_id": request.project_id
-                    }
-                    yield f"data: [DONE]\n\n"
-                    yield f"data: [METADATA]{metadata}\n\n"
-                    
-                except Exception as e:
-                    error_msg = f"Error during streaming: {str(e)}"
-                    yield f"data: {error_msg}\n\n"
-                    yield "data: [DONE]\n\n"
-            
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",  # Disable buffering in nginx
-                    "X-Session-ID": session_id
-                }
-            )
-        else:
-            # Non-streaming JSON response
-            response_text, metadata = service.chat_with_metadata(
-                request.message,
-                session_id=session_id,
-                project_id=request.project_id
-            )
-            
-            return ChatResponse(
-                response=response_text,
-                sources=metadata.get('sources', []),
-                session_id=session_id,
-                project_id=request.project_id,
-                routing_info=metadata.get('routing_info'),
-                safety_info=metadata.get('safety_info')
-            )
+        # Non-streaming JSON response - always return complete response
+        response_text, metadata = service.chat_with_metadata(
+            request.message,
+            session_id=session_id,
+            project_id=request.project_id
+        )
+        
+        return ChatResponse(
+            response=response_text,
+            sources=metadata.get('sources', []),
+            session_id=session_id,
+            project_id=request.project_id,
+            routing_info=metadata.get('routing_info'),
+            safety_info=metadata.get('safety_info')
+        )
             
     except Exception as e:
         raise HTTPException(

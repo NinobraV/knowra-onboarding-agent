@@ -421,6 +421,74 @@ class EnhancedMemoryStore:
         if len(self.short_term_memory[session_id]) > self.max_short_term_entries:
             self.short_term_memory[session_id] = self.short_term_memory[session_id][-self.max_short_term_entries:]
     
+    def _should_extract_facts(self, message: str, metadata: Dict[str, Any]) -> bool:
+        """
+        Determine if a message warrants fact extraction.
+        Separates fact-extraction worthy queries from normal conversational queries.
+        
+        Args:
+            message: Message text
+            metadata: Message metadata
+            
+        Returns:
+            True if facts should be extracted, False otherwise
+        """
+        # Skip fact extraction for very short messages (likely simple questions)
+        if len(message.split()) < 5:
+            return False
+        
+        # Skip for simple question queries that don't contain factual information
+        simple_question_patterns = [
+            r'^\s*(?:what|how|why|when|where|who|can|could|would|should|is|are|do|does)\s+',
+            r'^\s*(?:tell me|show me|explain|describe)\s+(?:about|how|what)',
+            r'^\s*(?:help|assist|guide)',
+        ]
+        
+        import re
+        message_lower = message.lower().strip()
+        for pattern in simple_question_patterns:
+            if re.match(pattern, message_lower):
+                # These are information-seeking queries, not fact-stating messages
+                return False
+        
+        # Extract facts from messages that contain structured information
+        fact_indicator_patterns = [
+            # Configuration/credentials
+            r'\b(?:password|api[_\s-]?key|token|secret|credential)\b',
+            r'\b(?:config|configuration|setting|environment)\s+(?:is|in|at|=)',
+            
+            # File/location references
+            r'\b(?:file|folder|directory|path)\s+(?:is|in|at|located)',
+            r'\b\w+\.\w+\s+(?:is|in|at|contains)',
+            
+            # Process/procedural information
+            r'\b(?:step|process|procedure|workflow)\s+\d+',
+            r'\b(?:first|then|next|finally|after that)\s+\w+',
+            
+            # System/technical information
+            r'\b(?:server|database|endpoint|url|host)\s+(?:is|at)',
+            r'\b(?:runs?|deploy|install|configure)\s+(?:on|at|in)',
+            
+            # Declarative statements
+            r'\b(?:the|this|that)\s+\w+\s+(?:is|are|contains?|stores?|uses?)',
+            r'\bwe\s+(?:use|store|keep|maintain)',
+        ]
+        
+        for pattern in fact_indicator_patterns:
+            if re.search(pattern, message_lower):
+                return True
+        
+        # Extract facts from longer, detailed responses (likely containing instructions)
+        if len(message.split()) > 30:
+            return True
+        
+        # Check metadata for fact-extraction hints
+        if metadata.get('force_fact_extraction', False):
+            return True
+        
+        # Default to not extracting for typical conversational queries
+        return False
+    
     def _extract_and_store_facts(
         self,
         session_id: str,
@@ -428,11 +496,20 @@ class EnhancedMemoryStore:
         project_id: Optional[str],
         metadata: Dict[str, Any]
     ) -> None:
-        """Extract and store facts from message."""
+        """
+        Extract and store facts from message (only for fact-worthy messages).
+        This separates fact extraction queries from normal conversational queries.
+        """
         if not self.fact_extractor:
             return
         
+        # Check if this message warrants fact extraction
+        if not self._should_extract_facts(message, metadata):
+            logger.debug(f"Skipping fact extraction for simple query: {message[:50]}...")
+            return
+        
         try:
+            logger.debug(f"Extracting facts from message: {message[:50]}...")
             facts = self.fact_extractor.extract_facts(
                 message, session_id, project_id, context=metadata
             )
@@ -445,7 +522,9 @@ class EnhancedMemoryStore:
                     fact_dict = self.fact_extractor.serialize_fact(fact)
                     self.fact_memory[session_id].append(fact_dict)
                     
-                logger.debug(f"Extracted {len(facts)} facts from message for session {session_id}")
+                logger.info(f"Extracted {len(facts)} facts from message for session {session_id}")
+            else:
+                logger.debug(f"No facts extracted from message")
         except Exception as e:
             logger.error(f"Fact extraction failed: {e}")
     
@@ -682,19 +761,56 @@ class EnhancedMemoryService:
         project_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Process a complete conversation turn."""
+        """
+        Process a complete conversation turn.
+        Automatically determines if fact extraction should occur.
+        """
         # Update session activity if session service is available
         if self.session_service:
             self.session_service.update_session_activity(session_id)
         
-        # Add to memory store
+        # Add to memory store (will automatically determine if facts should be extracted)
         self.memory_store.add_conversation_turn(
             session_id=session_id,
             user_message=user_message,
             assistant_response=assistant_response,
             project_id=project_id,
+            metadata=metadata or {}
+        )
+    
+    def extract_facts_explicitly(
+        self,
+        session_id: str,
+        message: str,
+        project_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Explicitly extract facts from a message, bypassing normal query filtering.
+        Use this when you know the message contains structured facts.
+        
+        Args:
+            session_id: Session identifier
+            message: Message to extract facts from
+            project_id: Optional project identifier
+            metadata: Additional metadata
+            
+        Returns:
+            List of extracted facts
+        """
+        metadata = metadata or {}
+        metadata['force_fact_extraction'] = True
+        
+        # Call the extraction method directly
+        self.memory_store._extract_and_store_facts(
+            session_id=session_id,
+            message=message,
+            project_id=project_id,
             metadata=metadata
         )
+        
+        # Return the extracted facts
+        return self.memory_store.fact_memory.get(session_id, [])
     
     def get_context_for_query(
         self,

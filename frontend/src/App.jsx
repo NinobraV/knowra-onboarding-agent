@@ -14,7 +14,6 @@ import './index.css';
 
 function App() {
   const [showMetadata, setShowMetadata] = useState(false);
-  const [useStreaming, setUseStreaming] = useState(false);
 
   // Session management
   const {
@@ -32,7 +31,7 @@ function App() {
     clearError: clearSessionError,
   } = useSessionManager();
 
-  // Chat functionality with session support
+  // Chat functionality with session support (non-streaming)
   const {
     messages,
     isLoading: chatLoading,
@@ -44,7 +43,6 @@ function App() {
   } = useChat({
     sessionId: currentSession?.session_id,
     projectId: currentProject,
-    useStreaming,
   });
 
   // Health monitoring
@@ -121,15 +119,6 @@ function App() {
                 />
                 Show Response Details
               </label>
-              
-              <label className="control-label">
-                <input
-                  type="checkbox"
-                  checked={useStreaming}
-                  onChange={(e) => setUseStreaming(e.target.checked)}
-                />
-                Stream Responses
-              </label>
             </div>
 
             {currentSession && (
@@ -163,9 +152,7 @@ function App() {
               placeholder={
                 !currentSession 
                   ? "Creating session..." 
-                  : useStreaming 
-                    ? "Type your message (streaming enabled)..." 
-                    : "Type your message..."
+                  : "Type your message..."
               }
             />
           </div>

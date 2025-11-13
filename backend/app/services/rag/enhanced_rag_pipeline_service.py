@@ -360,7 +360,7 @@ class EnhancedRAGPipelineService:
         project_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
-        Enhanced streaming chat with routing, safety, and memory.
+        DEPRECATED: Streaming is disabled. This method now calls chat_with_metadata internally.
         
         Args:
             query: User query
@@ -368,102 +368,15 @@ class EnhancedRAGPipelineService:
             project_id: Optional project identifier
             
         Yields:
-            str: Response chunks
+            str: Complete response as a single chunk
         """
-        # Set session context
-        if not session_id:
-            session_id = f"session-{uuid.uuid4()}"
-        self._set_session_context(session_id, project_id)
+        logger.warning("stream_response is deprecated. Use chat_with_metadata instead.")
         
-        # Get or create session
-        if self.enable_session_management:
-            session_info = self.session_service.get_or_create_session(
-                session_id=session_id,
-                project_id=project_id
-            )
-            session_id = session_info.session_id
+        # Call non-streaming method
+        response_text, metadata = self.chat_with_metadata(query, session_id, project_id)
         
-        try:
-            # Step 1: Safety analysis
-            safety_result = None
-            if self.enable_safety:
-                safety_result = self.safety_service.analyze_content(
-                    query,
-                    context={'session_id': session_id, 'project_id': project_id}
-                )
-                
-                if safety_result.level == SafetyLevel.BLOCKED:
-                    yield "I cannot process this request due to content policy restrictions."
-                    return
-                elif safety_result.level == SafetyLevel.SENSITIVE:
-                    # Use sanitized content
-                    query = safety_result.sanitized_content or query
-            
-            # Step 2: Route the query
-            routing_result = None
-            if self.enable_routing:
-                routing_result = self.router_service.route_query(
-                    query, session_id, project_id,
-                    context={
-                        'conversation_length': self._get_conversation_length(session_id),
-                        'has_recent_context': self._has_recent_context(session_id)
-                    }
-                )
-                logger.debug(f"Routing decision: {routing_result.decision.value} (confidence: {routing_result.confidence:.2f})")
-            
-            # Step 3: Get context based on routing
-            context_docs = []
-            memory_context = []
-            
-            if not routing_result or routing_result.decision in [RouteDecision.KNOWLEDGE_BASE_ONLY, RouteDecision.KNOWLEDGE_AND_MEMORY, RouteDecision.DEFAULT]:
-                # Get knowledge base documents
-                context_docs = self.vector_store_service.semantic_search(query, self.retriever_k)
-            
-            if not routing_result or routing_result.decision in [RouteDecision.MEMORY_ONLY, RouteDecision.KNOWLEDGE_AND_MEMORY]:
-                # Get memory context
-                if self.enhanced_memory:
-                    memory_context = self.enhanced_memory.get_context_for_query(
-                        session_id, query, max_context=5
-                    )
-            
-            # Step 4: Build enhanced context
-            enhanced_context = self._build_enhanced_context(context_docs, memory_context)
-            
-            # Step 5: Generate response
-            assembled_chunks = []
-            try:
-                # Properly await the async generator
-                async for chunk in self.llm_service.generate_answer_stream(query, enhanced_context):
-                    assembled_chunks.append(chunk)
-                    yield chunk
-            except Exception as e:
-                logger.warning(f"Streaming failed, falling back to sync: {e}")
-                # Fallback to sync generation
-                response = self.llm_service.generate_answer(query, enhanced_context)
-                assembled_chunks = [response]
-                yield response
-            
-            # Step 6: Process the complete response
-            complete_response = "".join(assembled_chunks)
-            
-            # Store conversation turn in enhanced memory
-            if self.enhanced_memory:
-                self.enhanced_memory.process_conversation_turn(
-                    session_id=session_id,
-                    user_message=query,
-                    assistant_response=complete_response,
-                    project_id=project_id,
-                    metadata={
-                        'routing_info': routing_result.__dict__ if routing_result else None,
-                        'safety_info': safety_result.__dict__ if safety_result else None,
-                        'context_sources': [getattr(doc, 'metadata', {}).get('source', 'unknown') for doc in context_docs],
-                        'timestamp': datetime.utcnow().isoformat()
-                    }
-                )
-            
-        except Exception as e:
-            logger.error(f"Enhanced streaming failed: {e}")
-            yield f"I apologize, but an error occurred while processing your request: {str(e)}"
+        # Yield complete response as single chunk
+        yield response_text
     
     def chat_with_metadata(
         self, 

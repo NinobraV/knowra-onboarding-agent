@@ -456,7 +456,8 @@ class LLMService:
             # append memory
             self._append_memory("user", query)
             self._append_memory("assistant", content)
-
+            logger.info("query: %s", query)
+            logger.info("LLM response: %s", content)
             return content
         finally:
             if REQUEST_LATENCY:

@@ -1,10 +1,10 @@
 /**
  * Custom hook for chat functionality
- * Manages messages, streaming, and chat operations with session support
+ * Manages messages and chat operations with session support (non-streaming)
  */
 
 import { useState, useCallback } from 'react';
-import { sendMessage as sendMessageAPI, clearHistory, sendMessageStream } from '../services/api.service';
+import { sendMessage as sendMessageAPI, clearHistory } from '../services/api.service';
 import { MESSAGE_ROLES } from '../utils/constants';
 import { generateId } from '../utils/helpers';
 
@@ -13,7 +13,6 @@ import { generateId } from '../utils/helpers';
  * @param {Object} options - Configuration options
  * @param {string} options.sessionId - Current session ID
  * @param {string} options.projectId - Current project ID
- * @param {boolean} options.useStreaming - Whether to use streaming responses
  * @returns {Object} Chat state and functions
  */
 export const useChat = (options = {}) => {
@@ -22,7 +21,7 @@ export const useChat = (options = {}) => {
   const [error, setError] = useState(null);
   const [lastResponseMetadata, setLastResponseMetadata] = useState(null);
 
-  const { sessionId, projectId, useStreaming = true } = options;
+  const { sessionId, projectId } = options;
 
   /**
    * Create a new message object
@@ -50,21 +49,7 @@ export const useChat = (options = {}) => {
   }, []);
 
   /**
-   * Update the last message (for streaming)
-   * @param {string} messageId - Message ID to update
-   * @param {string} content - New content
-   * @param {Object} updates - Additional updates
-   */
-  const updateMessage = useCallback((messageId, content, updates = {}) => {
-    setMessages((prev) => prev.map(msg => 
-      msg.id === messageId 
-        ? { ...msg, content, ...updates }
-        : msg
-    ));
-  }, []);
-
-  /**
-   * Send a message with streaming or non-streaming response
+   * Send a message with non-streaming response
    * @param {string} messageText - User message text
    */
   const sendMessage = useCallback(async (messageText) => {
@@ -80,77 +65,33 @@ export const useChat = (options = {}) => {
     setIsLoading(true);
     setError(null);
 
-    if (useStreaming) {
-      // Streaming response
+    try {
+      // Non-streaming response - always return complete response
+      const response = await sendMessageAPI(messageText, { sessionId, projectId });
+      
       const assistantMessage = createMessage(
         MESSAGE_ROLES.ASSISTANT,
-        '',
-        { isStreaming: true }
+        response.response || response.answer || response.message || 'No response',
+        { 
+          isStreaming: false,
+          sources: response.sources,
+          metadata: {
+            routing_info: response.routing_info,
+            safety_info: response.safety_info,
+            session_id: response.session_id,
+            project_id: response.project_id
+          }
+        }
       );
+      
       addMessage(assistantMessage);
-
-      try {
-        await sendMessageStream(
-          messageText,
-          { sessionId, projectId },
-          // onChunk
-          (chunk) => {
-            const content = typeof chunk === 'string' ? chunk : chunk.content || '';
-            updateMessage(assistantMessage.id, (prev) => prev + content);
-          },
-          // onComplete
-          () => {
-            updateMessage(assistantMessage.id, null, { isStreaming: false });
-            setIsLoading(false);
-          },
-          // onError
-          (err) => {
-            setError(`Streaming error: ${err.message}`);
-            updateMessage(assistantMessage.id, null, { 
-              isStreaming: false, 
-              hasError: true 
-            });
-            setIsLoading(false);
-          },
-          // onMetadata
-          (metadata) => {
-            setLastResponseMetadata(metadata);
-            updateMessage(assistantMessage.id, null, { metadata });
-          }
-        );
-      } catch (err) {
-        setError(`Error: ${err.message}`);
-        setIsLoading(false);
-      }
-    } else {
-      // Non-streaming response
-      try {
-        const response = await sendMessageAPI(messageText, { sessionId, projectId });
-        
-        const assistantMessage = createMessage(
-          MESSAGE_ROLES.ASSISTANT,
-          response.response || response.answer || response.message || 'No response',
-          { 
-            isStreaming: false,
-            sources: response.sources,
-            metadata: {
-              routing_info: response.routing_info,
-              safety_info: response.safety_info,
-              session_id: response.session_id,
-              project_id: response.project_id
-            }
-          }
-        );
-        
-        addMessage(assistantMessage);
-        setLastResponseMetadata(assistantMessage.metadata);
-        setIsLoading(false);
-      } catch (err) {
-        setError(`Error: ${err.message}`);
-        setIsLoading(false);
-      }
+      setLastResponseMetadata(assistantMessage.metadata);
+      setIsLoading(false);
+    } catch (err) {
+      setError(`Error: ${err.message}`);
+      setIsLoading(false);
     }
-  }, [isLoading, addMessage, createMessage, updateMessage, useStreaming, sessionId, projectId]);
+  }, [isLoading, addMessage, createMessage, sessionId, projectId]);
 
   /**
    * Clear all messages and chat history for current session
@@ -187,7 +128,6 @@ export const useChat = (options = {}) => {
     clearMessages,
     clearError,
     addMessage,
-    updateMessage,
     createMessage,
   };
 };
