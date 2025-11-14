@@ -35,11 +35,13 @@ function App() {
   const {
     messages,
     isLoading: chatLoading,
+    isLoadingHistory,
     error: chatError,
     lastResponseMetadata,
     sendMessage,
     clearMessages,
     clearError: clearChatError,
+    refreshMessages,
   } = useChat({
     sessionId: currentSession?.session_id,
     projectId: currentProject,
@@ -67,7 +69,7 @@ function App() {
   }, [sendMessage, chatLoading]);
 
   const displayError = chatError || sessionError || healthError;
-  const isLoading = chatLoading || sessionLoading;
+  const isLoading = chatLoading || sessionLoading || isLoadingHistory;
 
   return (
     <div className="app">
@@ -141,6 +143,7 @@ function App() {
             showMetadata={showMetadata}
             currentSession={currentSession}
             lastMetadata={lastResponseMetadata}
+            isLoadingHistory={isLoadingHistory}
           />
 
           <div className="input-container">

@@ -3,8 +3,8 @@
  * Manages messages and chat operations with session support (non-streaming)
  */
 
-import { useState, useCallback } from 'react';
-import { sendMessage as sendMessageAPI, clearHistory } from '../services/api.service';
+import { useState, useCallback, useEffect } from 'react';
+import { sendMessage as sendMessageAPI, clearHistory, getRecentMessages } from '../services/api.service';
 import { MESSAGE_ROLES } from '../utils/constants';
 import { generateId } from '../utils/helpers';
 
@@ -18,10 +18,62 @@ import { generateId } from '../utils/helpers';
 export const useChat = (options = {}) => {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [error, setError] = useState(null);
   const [lastResponseMetadata, setLastResponseMetadata] = useState(null);
 
   const { sessionId, projectId } = options;
+
+  /**
+   * Load message history for current session
+   */
+  const loadMessageHistory = useCallback(async () => {
+    if (!sessionId) {
+      setMessages([]);
+      return;
+    }
+
+    setIsLoadingHistory(true);
+    setError(null);
+
+    try {
+      const historyData = await getRecentMessages(sessionId, 50); // Load last 50 messages
+      
+      // Backend returns array directly, not wrapped in {messages: [...]}
+      const messagesArray = Array.isArray(historyData) ? historyData : (historyData.messages || []);
+      
+      // Convert backend message format to frontend format
+      const formattedMessages = messagesArray.map(msg => ({
+        id: msg.id || msg.message_id || generateId(),
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.created_at || msg.timestamp,
+        sessionId: msg.session_id,
+        projectId: msg.project_id,
+        metadata: {
+          routing_info: msg.routing_info,
+          safety_info: msg.safety_info,
+          tokens: msg.tokens,
+        },
+        sources: msg.sources,
+      }));
+
+      setMessages(formattedMessages);
+      setIsLoadingHistory(false);
+    } catch (err) {
+      console.error('Failed to load message history:', err);
+      setError(`Failed to load history: ${err.message}`);
+      setMessages([]); // Clear messages on error
+      setIsLoadingHistory(false);
+    }
+  }, [sessionId]);
+
+  /**
+   * Auto-load messages when session changes
+   */
+  useEffect(() => {
+    loadMessageHistory();
+  }, [sessionId, loadMessageHistory]);
 
   /**
    * Create a new message object
@@ -116,10 +168,18 @@ export const useChat = (options = {}) => {
     setError(null);
   }, []);
 
+  /**
+   * Refresh/reload message history
+   */
+  const refreshMessages = useCallback(() => {
+    return loadMessageHistory();
+  }, [loadMessageHistory]);
+
   return {
     // State
     messages,
     isLoading,
+    isLoadingHistory,
     error,
     lastResponseMetadata,
     
@@ -129,6 +189,8 @@ export const useChat = (options = {}) => {
     clearError,
     addMessage,
     createMessage,
+    loadMessageHistory,
+    refreshMessages,
   };
 };
 

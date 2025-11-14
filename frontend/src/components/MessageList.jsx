@@ -13,13 +13,19 @@ const MessageList = ({
   onExampleClick, 
   showMetadata = false,
   currentSession = null,
-  lastMetadata = null
+  lastMetadata = null,
+  isLoadingHistory = false
 }) => {
   const scrollRef = useAutoScroll([messages]);
 
   return (
     <div className="messages-container" role="log" aria-live="polite" aria-label="Chat messages">
-      {messages.length === 0 ? (
+      {isLoadingHistory ? (
+        <div className="loading-history">
+          <div className="loading-spinner"></div>
+          <p>Loading conversation history...</p>
+        </div>
+      ) : messages.length === 0 ? (
         <WelcomeScreen 
           onQuestionClick={onExampleClick}
           currentSession={currentSession}
@@ -80,6 +86,7 @@ MessageList.propTypes = {
   showMetadata: PropTypes.bool,
   currentSession: PropTypes.object,
   lastMetadata: PropTypes.object,
+  isLoadingHistory: PropTypes.bool,
 };
 
 MessageList.defaultProps = {
@@ -88,6 +95,7 @@ MessageList.defaultProps = {
   showMetadata: false,
   currentSession: null,
   lastMetadata: null,
+  isLoadingHistory: false,
 };
 
 export default MessageList;

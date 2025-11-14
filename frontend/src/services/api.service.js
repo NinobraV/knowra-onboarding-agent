@@ -351,7 +351,7 @@ export const getSessionMessages = async (sessionId, options = {}) => {
  * Get recent messages for a session
  * @param {string} sessionId - Session identifier
  * @param {number} limit - Number of recent messages (default: 10)
- * @returns {Promise<Array>} Recent messages in chronological order
+ * @returns {Promise<Array>} Array of message objects in chronological order
  * @throws {Error} If request fails
  */
 export const getRecentMessages = async (sessionId, limit = 10) => {
@@ -362,7 +362,9 @@ export const getRecentMessages = async (sessionId, limit = 10) => {
       method: 'GET',
     });
 
-    return await response.json();
+    // Backend returns array directly: [message1, message2, ...]
+    const messages = await response.json();
+    return messages;
   } catch (error) {
     console.error('Get recent messages error:', error);
     throw error;
