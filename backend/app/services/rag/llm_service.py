@@ -456,82 +456,10 @@ class LLMService:
             # append memory
             self._append_memory("user", query)
             self._append_memory("assistant", content)
-            logger.info("query: %s", query)
+            logger.info("Prompt: %s", prompt)
             logger.info("LLM response: %s", content)
             return content
         finally:
-            if REQUEST_LATENCY:
-                REQUEST_LATENCY.observe(time.time() - start)
-
-    # --- Public API: streaming ---
-    async def generate_answer_stream(self, query: str, context_docs: Optional[List[Document]] = None) -> AsyncGenerator[str, None]:
-        session_id = self._get_session_id()
-        logger.info("generate_answer_stream called, session=%s", session_id)
-        if REQUEST_COUNTER:
-            REQUEST_COUNTER.inc()
-        start = time.time()
-
-        # moderation
-        self._moderate(query)
-
-        used_context = context_docs
-        if not used_context:
-            try:
-                used_context = self.retriever(query, k=5)
-            except Exception as e:
-                logger.debug("Retriever failed: %s", e)
-                used_context = []
-
-        if used_context:
-            prompt = self.build_context_prompt(query, used_context)
-        else:
-            prompt = query
-
-        memory_msgs = self._get_memory_messages()
-        if memory_msgs:
-            mem_text = "\n".join([f"{m['role']}: {m['content']}" for m in memory_msgs])
-            prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
-
-        prompt = self._enforce_token_limit(prompt)
-
-        # track this async task
-        task = asyncio.current_task()
-        task_id = f"{session_id}:{id(task)}"
-        self._active_stream_tasks[task_id] = task
-
-        buffer: List[str] = []
-        try:
-            if not self.adapter:
-                raise RuntimeError("LLM adapter not initialized")
-            
-            # attempt streaming via adapter
-            try:
-                async for chunk in self.adapter.astream(prompt):
-                    content = getattr(chunk, "content", None)
-                    if content is None:
-                        content = chunk if isinstance(chunk, str) else str(chunk)
-                    if not content:
-                        continue
-                    # optional partial moderation
-                    if not self.moderation_hook(content):
-                        logger.warning("Stream chunk blocked by moderation. Cancelling stream.")
-                        raise ModerationError("Stream output blocked by moderation")
-                    buffer.append(content)
-                    yield content
-            except (AttributeError, RuntimeWarning) as e:
-                # adapter has no streaming or coroutine issues; fallback to sync call
-                logger.debug(f"Streaming failed ({e}), falling back to sync generation")
-                full = self.generate_answer(query, context_docs=context_docs)
-                buffer.append(full)
-                yield full
-                return
-            # after stream completes
-            full = "".join(buffer)
-            self._append_memory("user", query)
-            self._append_memory("assistant", full)
-            yield ""  # optional sentinel (can be removed)
-        finally:
-            self._active_stream_tasks.pop(task_id, None)
             if REQUEST_LATENCY:
                 REQUEST_LATENCY.observe(time.time() - start)
 

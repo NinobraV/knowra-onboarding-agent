@@ -438,9 +438,7 @@ class RAGPipelineService:
         except AttributeError:
             # agent executor has no astream, fallback to LLMService streaming or sync
             try:
-                async for out in self.llm_service.generate_answer_stream(query):
-                    assembled.append(out)
-                    yield out
+                print("⚠️ Agent executor has no streaming; falling back to LLMService streaming")
             except Exception:
                 # fallback to sync generate
                 res = self.llm_service.generate_answer(query)
