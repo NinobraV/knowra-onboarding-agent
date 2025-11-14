@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     CHUNK_EXTRACT_METADATA: bool = True     # Extract frontmatter and metadata
     
     # MongoDB Configuration
-    MONGODB_URL: str = "mongodb+srv://tuantran245:Tranquoctuan0126@cluster0.pvdzsfu.mongodb.net/?appName=Cluster0"
+    MONGODB_URL: str = ""
     MONGODB_DB_NAME: str = "knowra_chatbot"
     MONGODB_MAX_POOL_SIZE: int = 10
     MONGODB_MIN_POOL_SIZE: int = 1
