@@ -19,7 +19,7 @@ from enum import Enum
 # Import our fact extractor
 try:
     from .fact_extractor_service import FactExtractorService, FactType, ImportanceLevel
-    FACT_EXTRACTOR_AVAILABLE = True
+    FACT_EXTRACTOR_AVAILABLE = False
     FactExtractorType = FactExtractorService
 except ImportError:
     FactExtractorService = None

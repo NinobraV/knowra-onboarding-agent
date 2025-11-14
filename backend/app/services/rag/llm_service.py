@@ -399,11 +399,111 @@ class LLMService:
             return self.chat_history
 
     def _enforce_token_limit(self, prompt: str) -> str:
+        """
+        Intelligently enforce token limit while preserving prompt structure.
+        For structured prompts, truncate context and history sections.
+        """
         prompt_tokens = simple_token_count(prompt)
         if prompt_tokens <= self.max_prompt_tokens:
             return prompt
-        logger.warning("Prompt tokens (%d) exceed max (%d). Truncating context.", prompt_tokens, self.max_prompt_tokens)
-        return truncate_by_tokens(prompt, self.max_prompt_tokens)
+        
+        logger.warning("Prompt tokens (%d) exceed max (%d). Intelligently truncating...", prompt_tokens, self.max_prompt_tokens)
+        
+        # Check if this is our structured prompt format
+        if "Conversation context:" in prompt and "Previous conversation:" in prompt:
+            return self._truncate_simple_structured_prompt(prompt)
+        else:
+            # Fallback to simple truncation for unstructured prompts
+            return truncate_by_tokens(prompt, self.max_prompt_tokens)
+    
+    def _truncate_simple_structured_prompt(self, prompt: str) -> str:
+        """
+        Truncate a structured prompt by reducing context and conversation history.
+        Priority: Instructions (keep) > User question (keep) > Context (truncate) > History (truncate)
+        """
+        original_tokens = simple_token_count(prompt)
+        
+        try:
+            # Split into main parts
+            parts = {}
+            
+            # Extract system instructions (everything before "Context from knowledge base:")
+            if "Conversation context:" in prompt:
+                sys_end = prompt.index("Context from knowledge base:")
+                parts["system"] = prompt[:sys_end].strip()
+            else:
+                parts["system"] = ""
+            
+            # Extract context
+            if "Conversation context:" in prompt and "Previous conversation:" in prompt:
+                ctx_start = prompt.index("Context from knowledge base:") + len("Context from knowledge base:")
+                ctx_end = prompt.index("Previous conversation:")
+                parts["context"] = prompt[ctx_start:ctx_end].strip()
+            else:
+                parts["context"] = ""
+            
+            # Extract conversation history
+            if "Previous conversation:" in prompt and "User question:" in prompt:
+                hist_start = prompt.index("Previous conversation:") + len("Previous conversation:")
+                hist_end = prompt.index("User question:")
+                parts["history"] = prompt[hist_start:hist_end].strip()
+            else:
+                parts["history"] = ""
+            
+            # Extract user question and instructions
+            if "User question:" in prompt:
+                query_start = prompt.index("User question:")
+                parts["query_and_instructions"] = prompt[query_start:].strip()
+            else:
+                parts["query_and_instructions"] = ""
+            
+            # Calculate token counts
+            system_tokens = simple_token_count(parts["system"])
+            query_tokens = simple_token_count(parts["query_and_instructions"])
+            context_tokens = simple_token_count(parts["context"])
+            history_tokens = simple_token_count(parts["history"])
+            
+            # Essential sections (must keep)
+            essential_tokens = system_tokens + query_tokens + 20  # +20 for spacing
+            available_tokens = self.max_prompt_tokens - essential_tokens
+            
+            if available_tokens <= 0:
+                logger.warning("Essential sections exceed token limit. Using minimal prompt.")
+                available_tokens = 200
+            
+            # Allocate: 70% to context, 30% to history
+            context_budget = int(available_tokens * 0.7)
+            history_budget = int(available_tokens * 0.3)
+            
+            # Truncate context if needed
+            if context_tokens > context_budget:
+                parts["context"] = truncate_by_tokens(parts["context"], context_budget) + "\n\n[... context truncated ...]"
+            
+            # Truncate history if needed (keep most recent)
+            if history_tokens > history_budget:
+                parts["history"] = truncate_by_tokens(parts["history"], history_budget) + "\n\n[... older messages truncated ...]"
+            
+            # Reconstruct
+            reconstructed = f"""{parts["system"]}
+
+Context from knowledge base:
+{parts["context"]}
+
+Previous conversation:
+{parts["history"]}
+
+{parts["query_and_instructions"]}"""
+            
+            final_tokens = simple_token_count(reconstructed)
+            logger.info("Truncated prompt: %d tokens (original: %d, limit: %d)", 
+                       final_tokens, original_tokens, self.max_prompt_tokens)
+            
+            return reconstructed
+            
+        except Exception as e:
+            logger.exception("Error in structured truncation: %s", e)
+            # Fallback to simple truncation
+            return truncate_by_tokens(prompt, self.max_prompt_tokens)
 
     def _moderate(self, text: str) -> None:
         allowed = self.moderation_hook(text)
@@ -430,23 +530,46 @@ class LLMService:
                     logger.debug("Retriever failed: %s", e)
                     used_context = []
 
+            # Build context from retrieved documents
+            context_text = ""
             if used_context:
-                prompt = self.build_context_prompt(query, used_context)
-            else:
-                prompt = query
+                context_text = "\n\n".join([
+                    f"Source: {getattr(doc, 'metadata', {}).get('source', 'Unknown')}\n{getattr(doc, 'page_content', str(doc))}"
+                    for doc in used_context
+                ])
 
-            # prepend memory if exists
+            # Get message history
             memory_msgs = self._get_memory_messages()
+            message_history_text = ""
             if memory_msgs:
-                mem_text = "\n".join([f"{m['role']}: {m['content']}" for m in memory_msgs])
-                prompt = f"Conversation history:\n{mem_text}\n\n{prompt}"
+                message_history_text = "\n".join([f"{m['role']}: {m['content']}" for m in memory_msgs])
 
-            prompt = self._enforce_token_limit(prompt)
+            # Build structured prompt following the OnboardingAI template
+            # Use a more concise format to avoid content policy triggers
+            structured_prompt = f"""You are OnboardingAI, an intelligent assistant that answers questions based on company policies, internal documents, and prior conversations.
+
+Rules:
+- Provide accurate, concise answers
+- Never hallucinate
+- Use previous messages for continuity
+
+Conversation context:
+{context_text if context_text else "No relevant context found."}
+
+Previous conversation:
+{message_history_text if message_history_text else "No previous messages."}
+
+User question: {query}
+
+Instructions: Provide a helpful and direct answer. Cite sources when applicable."""
+
+            # Enforce token limit on the structured prompt
+            structured_prompt = self._enforce_token_limit(structured_prompt)
 
             # call adapter
             if not self.adapter:
                 raise RuntimeError("LLM adapter not initialized")
-            res = self.adapter.invoke(prompt)
+            res = self.adapter.invoke(structured_prompt)
             content = getattr(res, "content", res if isinstance(res, str) else str(res))
 
             # post moderation
@@ -456,7 +579,7 @@ class LLMService:
             # append memory
             self._append_memory("user", query)
             self._append_memory("assistant", content)
-            logger.info("Prompt: %s", prompt)
+            logger.info("Structured Prompt: %s", structured_prompt)
             logger.info("LLM response: %s", content)
             return content
         finally:
