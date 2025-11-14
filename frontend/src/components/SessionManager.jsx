@@ -64,6 +64,21 @@ const SessionManager = ({
   };
   console.log("session", sessions)
 
+  // Resolve a session's display name robustly across possible field names
+  const getSessionName = (s) => {
+    if (!s) return '';
+    const candidates = [
+      s.session_name,
+      s.name,
+      s.title,
+      s.sessionTitle,
+      s.metadata?.session_name,
+      s.metadata?.name,
+    ];
+    const val = candidates.find(v => typeof v === 'string' && v.trim().length > 0);
+    return val || '';
+  };
+
   return (
     <div className={`session-manager ${className}`}>
       {error && (
@@ -84,7 +99,7 @@ const SessionManager = ({
         <div className="session-header">
           <h3>
             {currentSession 
-              ? `${currentSession.session_name || 'Untitled Session'}`
+              ? (getSessionName(currentSession) || 'Untitled Session')
               : 'No Active Session'
             }
           </h3>
@@ -148,14 +163,12 @@ const SessionManager = ({
                 {sessions.map((session) => (
                   <div
                     key={session.session_id}
-                    className={`session-item ${
-                      currentSession?.session_id === session.session_id ? 'active' : ''
-                    }`}
+                    className={`session-item ${currentSession?.session_id === session.session_id ? 'active' : ''}`}
                   >
                     <div className="session-item-content">
                       <div className="session-item-header">
                         <span className="session-name">
-                          {session.session_name || 'Untitled Session'}
+                          {getSessionName(session) || 'Untitled Session'}
                         </span>
                         <span className="session-date">
                           {formatDate(session.created_at)}
@@ -182,7 +195,7 @@ const SessionManager = ({
                         </button>
                       )}
                       <button
-                        onClick={() => handleDeleteSession(session.session_id, session.session_name)}
+                        onClick={() => handleDeleteSession(session.session_id, getSessionName(session))}
                         className="btn btn-sm btn-danger"
                         disabled={isLoading}
                       >
