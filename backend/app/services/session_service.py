@@ -236,6 +236,7 @@ class SessionService:
         
     def create_session(
         self,
+        session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         project_id: Optional[str] = None,
         session_name: Optional[str] = None,
@@ -253,7 +254,7 @@ class SessionService:
         Returns:
             SessionInfo: Created session information
         """
-        session_id = f"session-{uuid.uuid4()}"
+        session_id = session_id or f"session-{uuid.uuid4()}"
         now = datetime.utcnow()
         expires_at = now + self.default_session_ttl
         

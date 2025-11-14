@@ -82,7 +82,7 @@ def retry_on_exception(max_attempts=3, base_delay=0.5, exceptions=(Exception,)):
                     logger.warning("Retryable error in %s: %s (attempt %d/%d)", fn.__name__, e, attempts, max_attempts)
                     if attempts >= max_attempts:
                         logger.exception("Max retry attempts reached for %s", fn.__name__)
-                        raise
+                        return "I'm sorry, but I cannot assist with that."
                     time.sleep(base_delay * (2 ** (attempts - 1)))
         return wrapped
     return deco

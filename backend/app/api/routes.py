@@ -245,12 +245,19 @@ async def create_session(request: SessionRequest):
         HTTPException: If session creation fails
     """
     try:
+        service = get_rag_service()
         persistence = get_chat_persistence()
         session_response = await persistence.create_session(
             user_id=request.user_id,
             project_id=request.project_id or "default",
             title=request.session_name
         )
+
+        service.create_session(
+            session_id = session_response.session_id, 
+            user_id=request.user_id,
+            project_id=request.project_id,
+            session_name=request.session_name)
         
         return SessionResponse(
             session_id=session_response.session_id,
@@ -328,7 +335,7 @@ async def get_session(session_id: str):
                 status_code=404,
                 detail=f"Session {session_id} not found"
             )
-        
+
         return SessionResponse(
             session_id=session_response.session_id,
             user_id=session_response.user_id,

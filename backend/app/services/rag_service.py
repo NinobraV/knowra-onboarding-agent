@@ -202,13 +202,14 @@ class RAGService:
     # Session management methods (enhanced pipeline only)
     def create_session(
         self, 
+        session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         project_id: Optional[str] = None,
         session_name: Optional[str] = None
     ):
         """Create a new session."""
         if self._is_enhanced:
-            return self._pipeline.create_session(user_id, project_id, session_name)
+            return self._pipeline.create_session(session_id, user_id, project_id, session_name)
         else:
             raise NotImplementedError("Session management requires enhanced pipeline")
     

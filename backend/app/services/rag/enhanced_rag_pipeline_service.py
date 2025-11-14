@@ -521,6 +521,7 @@ class EnhancedRAGPipelineService:
     # Session management methods
     def create_session(
         self, 
+        session_id: Optional[str] = None,
         user_id: Optional[str] = None,
         project_id: Optional[str] = None,
         session_name: Optional[str] = None
@@ -530,6 +531,7 @@ class EnhancedRAGPipelineService:
             raise NotImplementedError("Session management not enabled")
         
         return self.session_service.create_session(
+            session_id=session_id,
             user_id=user_id,
             project_id=project_id,
             session_name=session_name
