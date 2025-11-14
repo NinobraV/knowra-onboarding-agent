@@ -14,6 +14,11 @@ export const API_CONFIG = {
     SESSIONS: '/api/sessions',
     SESSION_BY_ID: (sessionId) => `/api/sessions/${sessionId}`,
     SESSION_STATS: (sessionId) => `/api/sessions/${sessionId}/stats`,
+    // Message history endpoints
+    SESSION_MESSAGES: (sessionId) => `/api/sessions/${sessionId}/messages`,
+    SESSION_MESSAGES_RECENT: (sessionId) => `/api/sessions/${sessionId}/messages/recent`,
+    SESSION_HISTORY_STATS: (sessionId) => `/api/sessions/${sessionId}/history-stats`,
+    GLOBAL_STATS: '/api/stats/global',
   },
   TIMEOUT: 450000, // 45 seconds
 };
@@ -55,18 +60,18 @@ export const PROJECT_EXAMPLES = {
   'onboarding': [
     'What is the employee onboarding checklist?',
     'How long does the onboarding process take?',
-    'What documents do new employees need?'
+    'What documents do new employees need?',
   ],
   'development': [
     'What is the system architecture?',
     'How do I set up the development environment?',
-    'What are the coding standards?'
+    'What are the coding standards?',
   ],
   'deployment': [
     'How do I deploy to production?',
     'What are the security requirements?',
-    'How do I monitor the application?'
-  ]
+    'How do I monitor the application?',
+  ],
 };
 
 // SSE (Server-Sent Events) markers
@@ -111,12 +116,12 @@ export const METADATA_LABELS = {
     'memory_only': 'Conversation Memory', 
     'kb_and_memory': 'Knowledge + Memory',
     'sensitive_handling': 'Sensitive Content',
-    'default': 'Standard Processing'
+    'default': 'Standard Processing',
   },
   SAFETY: {
     'safe': '✅ Safe',
     'potentially_sensitive': '⚠️ Sensitive',
     'sensitive': '🔒 Restricted',
-    'harmful': '❌ Blocked'
-  }
+    'harmful': '❌ Blocked',
+  },
 };

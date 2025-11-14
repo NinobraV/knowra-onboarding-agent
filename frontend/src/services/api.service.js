@@ -117,7 +117,7 @@ export const sendMessageStream = async (message, options = {}, onChunk, onComple
             const metadataStr = data.slice('[METADATA]'.length);
             try {
               const metadata = JSON.parse(metadataStr);
-              if (onMetadata) onMetadata(metadata);
+              if (onMetadata) {onMetadata(metadata);}
             } catch (e) {
               console.warn('Failed to parse metadata:', e);
             }
@@ -239,9 +239,9 @@ export const createSession = async (sessionData) => {
 export const listSessions = async (filters = {}) => {
   try {
     const params = new URLSearchParams();
-    if (filters.userId) params.append('user_id', filters.userId);
-    if (filters.projectId) params.append('project_id', filters.projectId);
-    if (filters.limit) params.append('limit', filters.limit.toString());
+    if (filters.userId) {params.append('user_id', filters.userId);}
+    if (filters.projectId) {params.append('project_id', filters.projectId);}
+    if (filters.limit) {params.append('limit', filters.limit.toString());}
 
     const url = params.toString() 
       ? `${API_CONFIG.ENDPOINTS.SESSIONS}?${params.toString()}`
@@ -316,6 +316,97 @@ export const getSessionStats = async (sessionId) => {
 };
 
 /**
+ * Get paginated messages for a session
+ * @param {string} sessionId - Session identifier
+ * @param {Object} options - Pagination options
+ * @param {number} options.page - Page number (1-indexed)
+ * @param {number} options.pageSize - Messages per page
+ * @param {boolean} options.ascending - Sort order (true = oldest first)
+ * @returns {Promise<Object>} Paginated message list
+ * @throws {Error} If request fails
+ */
+export const getSessionMessages = async (sessionId, options = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (options.page) {params.append('page', options.page.toString());}
+    if (options.pageSize) {params.append('page_size', options.pageSize.toString());}
+    if (options.ascending !== undefined) {params.append('ascending', options.ascending.toString());}
+
+    const url = params.toString()
+      ? `${API_CONFIG.ENDPOINTS.SESSION_MESSAGES(sessionId)}?${params.toString()}`
+      : API_CONFIG.ENDPOINTS.SESSION_MESSAGES(sessionId);
+
+    const response = await fetchWithErrorHandling(url, {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get session messages error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get recent messages for a session
+ * @param {string} sessionId - Session identifier
+ * @param {number} limit - Number of recent messages (default: 10)
+ * @returns {Promise<Array>} Recent messages in chronological order
+ * @throws {Error} If request fails
+ */
+export const getRecentMessages = async (sessionId, limit = 10) => {
+  try {
+    const url = `${API_CONFIG.ENDPOINTS.SESSION_MESSAGES_RECENT(sessionId)}?limit=${limit}`;
+
+    const response = await fetchWithErrorHandling(url, {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get recent messages error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get detailed session statistics including message history
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<Object>} Detailed session statistics
+ * @throws {Error} If request fails
+ */
+export const getSessionHistoryStats = async (sessionId) => {
+  try {
+    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.SESSION_HISTORY_STATS(sessionId), {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get session history stats error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get global statistics across all sessions and messages
+ * @returns {Promise<Object>} Global statistics
+ * @throws {Error} If request fails
+ */
+export const getGlobalStats = async () => {
+  try {
+    const response = await fetchWithErrorHandling(API_CONFIG.ENDPOINTS.GLOBAL_STATS, {
+      method: 'GET',
+    });
+
+    return await response.json();
+  } catch (error) {
+    console.error('Get global stats error:', error);
+    throw error;
+  }
+};
+
+/**
  * Check API health status
  * @returns {Promise<Object>} Health status and stats
  * @throws {Error} If request fails
@@ -366,6 +457,11 @@ const apiService = {
   getSession,
   deleteSession,
   getSessionStats,
+  // Message history
+  getSessionMessages,
+  getRecentMessages,
+  getSessionHistoryStats,
+  getGlobalStats,
 };
 
 export default apiService;

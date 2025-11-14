@@ -23,6 +23,18 @@ async def lifespan(app: FastAPI):
     # Startup
     app_logger.info("🚀 Starting Knowledge Chatbot Backend...")
     
+    # Initialize MongoDB
+    try:
+        from app.core.dependencies import initialize_mongodb, shutdown_mongodb
+        
+        app_logger.info("📦 Initializing MongoDB...")
+        await initialize_mongodb()
+        app_logger.info("✅ MongoDB initialized successfully")
+    except Exception as e:
+        app_logger.warning(f"⚠️  MongoDB initialization failed: {e}")
+        app_logger.warning("   Continuing without persistent chat history...")
+    
+    # Initialize RAG service
     try:
         service = get_rag_service()
         app_logger.info("✅ RAG Service initialized successfully")
@@ -35,6 +47,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     app_logger.info("👋 Shutting down...")
+    
+    # Disconnect MongoDB
+    try:
+        await shutdown_mongodb()
+    except Exception as e:
+        app_logger.warning(f"Error during MongoDB shutdown: {e}")
 
 
 # Create FastAPI application

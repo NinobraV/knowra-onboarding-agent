@@ -4,6 +4,10 @@ uvicorn[standard]==0.32.1
 python-dotenv==1.0.1
 scikit-learn==1.7.2 # For PCA
 
+# MongoDB async driver
+motor==3.6.0
+pymongo[srv]==4.9.1
+
 # LangChain and RAG
 langchain==0.3.13
 langchain-openai==0.2.10

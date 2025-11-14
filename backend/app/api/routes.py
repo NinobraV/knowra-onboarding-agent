@@ -13,9 +13,11 @@ from app.models.schemas import (
     RootResponse,
     SessionRequest,
     SessionResponse,
-    SessionListResponse
+    SessionListResponse,
+    MessageListResponse,
+    ChatSessionListResponse
 )
-from app.core.dependencies import get_rag_service, rebuild_rag_service
+from app.core.dependencies import get_rag_service, rebuild_rag_service, get_chat_persistence
 from app.core.config import settings
 
 
@@ -68,6 +70,7 @@ async def health_check():
 async def chat(request: ChatRequest):
     """
     Chat endpoint - returns complete response (non-streaming).
+    Persists user message and assistant response to MongoDB.
     
     Args:
         request: Chat request with message and session info
@@ -80,21 +83,81 @@ async def chat(request: ChatRequest):
     """
     try:
         service = get_rag_service()
+        persistence = get_chat_persistence()
         
-        # Get or create session if session_id provided
+        # Get or create session
         session_id = request.session_id
         if not session_id:
-            # Generate a new session ID if none provided
-            session_id = f"session-{uuid.uuid4()}"
+            # Create a new session if none provided
+            session_response = await persistence.create_session(
+                user_id=None,
+                project_id=request.project_id or "default",
+                title=None  # Will be auto-generated from first message
+            )
+            session_id = session_response.session_id
+        else:
+            # Verify session exists
+            existing_session = await persistence.get_session(session_id)
+            if not existing_session:
+                # Create session if it doesn't exist
+                session_response = await persistence.create_session(
+                    user_id=None,
+                    project_id=request.project_id or "default",
+                    title=None
+                )
+                session_id = session_response.session_id
         
-        # Note: Auto-rebuild is controlled by AUTO_REBUILD_ENABLED in config
-        # Manual rebuild available via POST /rebuild endpoint
+        # Persist user message
+        await persistence.add_message(
+            session_id=session_id,
+            role="user",
+            content=request.message,
+            sources=None,
+            routing_info=None,
+            safety_info=None,
+            tokens=None
+        )
         
-        # Non-streaming JSON response - always return complete response
+        # Check if this is the first message and generate title
+        session = await persistence.get_session(session_id)
+        if session and session.message_count == 1:  # First message just added
+            from app.utils.title_generator import generate_session_title
+            try:
+                title = await generate_session_title(request.message, llm_service=service)
+                await persistence.update_session_title(session_id, title)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to generate session title: {e}")
+        
+        # Get RAG response
         response_text, metadata = service.chat_with_metadata(
             request.message,
             session_id=session_id,
             project_id=request.project_id
+        )
+        
+        # Prepare sources for persistence
+        sources = None
+        if metadata.get('sources'):
+            sources = [
+                {
+                    "id": src.get("id", "unknown"),
+                    "score": src.get("score", 0.0),
+                    "text": src.get("text", ""),
+                    "metadata": src.get("metadata", {})
+                }
+                for src in metadata.get('sources', [])
+            ]
+        
+        # Persist assistant message with metadata
+        await persistence.add_message(
+            session_id=session_id,
+            role="assistant",
+            content=response_text,
+            sources=sources,
+            routing_info=metadata.get('routing_info'),
+            safety_info=metadata.get('safety_info'),
+            tokens=metadata.get('tokens')
         )
         
         return ChatResponse(
@@ -182,19 +245,19 @@ async def create_session(request: SessionRequest):
         HTTPException: If session creation fails
     """
     try:
-        service = get_rag_service()
-        session_info = service.create_session(
+        persistence = get_chat_persistence()
+        session_response = await persistence.create_session(
             user_id=request.user_id,
-            project_id=request.project_id,
-            session_name=request.session_name
+            project_id=request.project_id or "default",
+            title=request.session_name
         )
         
         return SessionResponse(
-            session_id=session_info.session_id,
-            user_id=session_info.user_id,
-            project_id=session_info.project_id,
-            session_name=session_info.session_name,
-            created_at=session_info.created_at.isoformat()
+            session_id=session_response.session_id,
+            user_id=session_response.user_id,
+            project_id=session_response.project_id,
+            session_name=session_response.title,
+            created_at=session_response.created_at.isoformat()
         )
     except Exception as e:
         raise HTTPException(
@@ -203,48 +266,38 @@ async def create_session(request: SessionRequest):
         )
 
 
-@router.get("/api/sessions", response_model=SessionListResponse)
+@router.get("/api/sessions", response_model=ChatSessionListResponse)
 async def list_sessions(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     project_id: Optional[str] = Query(None, description="Filter by project ID"),
-    limit: int = Query(50, ge=1, le=200, description="Maximum number of sessions to return")
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(50, ge=1, le=200, description="Maximum number of sessions to return")
 ):
     """
-    List conversation sessions with optional filtering.
+    List conversation sessions with optional filtering and pagination.
     
     Args:
         user_id: Optional user ID filter
         project_id: Optional project ID filter
-        limit: Maximum number of sessions to return
+        page: Page number
+        page_size: Maximum number of sessions to return
         
     Returns:
-        SessionListResponse: List of sessions
+        ChatSessionListResponse: Paginated list of sessions
         
     Raises:
         HTTPException: If listing fails
     """
     try:
-        service = get_rag_service()
-        sessions = service.list_sessions(
+        persistence = get_chat_persistence()
+        sessions = await persistence.list_sessions(
             user_id=user_id,
             project_id=project_id,
-            limit=limit
+            page=page,
+            page_size=page_size
         )
         
-        session_responses = []
-        for session in sessions:
-            session_responses.append(SessionResponse(
-                session_id=session.session_id,
-                user_id=session.user_id,
-                project_id=session.project_id,
-                session_name=session.session_name,
-                created_at=session.created_at.isoformat()
-            ))
-        
-        return SessionListResponse(
-            sessions=session_responses,
-            total_count=len(session_responses)
-        )
+        return sessions
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -267,21 +320,21 @@ async def get_session(session_id: str):
         HTTPException: If session not found or retrieval fails
     """
     try:
-        service = get_rag_service()
-        session_info = service.get_session(session_id)
+        persistence = get_chat_persistence()
+        session_response = await persistence.get_session(session_id)
         
-        if not session_info:
+        if not session_response:
             raise HTTPException(
                 status_code=404,
                 detail=f"Session {session_id} not found"
             )
         
         return SessionResponse(
-            session_id=session_info.session_id,
-            user_id=session_info.user_id,
-            project_id=session_info.project_id,
-            session_name=session_info.session_name,
-            created_at=session_info.created_at.isoformat()
+            session_id=session_response.session_id,
+            user_id=session_response.user_id,
+            project_id=session_response.project_id,
+            session_name=session_response.title,
+            created_at=session_response.created_at.isoformat()
         )
     except HTTPException:
         raise
@@ -307,14 +360,23 @@ async def delete_session(session_id: str):
         HTTPException: If deletion fails
     """
     try:
-        service = get_rag_service()
-        success = service.delete_session(session_id)
+        persistence = get_chat_persistence()
+        success = await persistence.delete_session(session_id, cascade=True)
         
         if not success:
             raise HTTPException(
                 status_code=404,
                 detail=f"Session {session_id} not found"
             )
+        
+        # Also clear from RAG service if it has the session
+        try:
+            service = get_rag_service()
+            service.delete_session(session_id)
+        except Exception as e:
+            # Log but don't fail if RAG service cleanup fails
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to clean up RAG session: {e}")
         
         return ClearResponse(
             message=f"Session {session_id} deleted successfully",
@@ -361,3 +423,173 @@ async def get_session_stats(session_id: str):
             status_code=500,
             detail=f"Failed to get session stats: {str(e)}"
         )
+
+
+# ============================================================================
+# Message History Endpoints (MongoDB-backed)
+# ============================================================================
+
+@router.get("/api/sessions/{session_id}/messages", response_model=MessageListResponse)
+async def get_session_messages(
+    session_id: str,
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(50, ge=1, le=200, description="Messages per page"),
+    ascending: bool = Query(True, description="Sort order: true for oldest first, false for newest first")
+):
+    """
+    Get paginated messages for a session.
+    
+    Args:
+        session_id: Session identifier
+        page: Page number (1-indexed)
+        page_size: Number of messages per page
+        ascending: Sort order (true = oldest first, false = newest first)
+        
+    Returns:
+        MessageListResponse: Paginated message list with metadata
+        
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    try:
+        persistence = get_chat_persistence()
+        
+        # Check if session exists
+        session = await persistence.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+        
+        # Get paginated messages
+        messages = await persistence.get_messages(
+            session_id=session_id,
+            page=page,
+            page_size=page_size,
+            ascending=ascending
+        )
+        
+        return messages
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve messages: {str(e)}"
+        )
+
+
+@router.get("/api/sessions/{session_id}/messages/recent")
+async def get_recent_messages(
+    session_id: str,
+    limit: int = Query(10, ge=1, le=100, description="Number of recent messages")
+):
+    """
+    Get the most recent messages for a session.
+    
+    Args:
+        session_id: Session identifier
+        limit: Number of recent messages to return
+        
+    Returns:
+        List[ChatMessageResponse]: Recent messages (chronological order)
+        
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    try:
+        persistence = get_chat_persistence()
+        
+        # Check if session exists
+        session = await persistence.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+        
+        # Get recent messages
+        messages = await persistence.get_recent_messages(
+            session_id=session_id,
+            limit=limit
+        )
+        
+        return messages
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve recent messages: {str(e)}"
+        )
+
+
+@router.get("/api/sessions/{session_id}/history-stats")
+async def get_session_history_stats(session_id: str):
+    """
+    Get detailed statistics for a session including message history.
+    
+    Args:
+        session_id: Session identifier
+        
+    Returns:
+        Dict: Detailed session statistics
+        
+    Raises:
+        HTTPException: If session not found or retrieval fails
+    """
+    try:
+        persistence = get_chat_persistence()
+        
+        stats = await persistence.get_session_stats(session_id)
+        
+        if not stats:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+        
+        return stats
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get session statistics: {str(e)}"
+        )
+
+
+@router.get("/api/stats/global")
+async def get_global_stats():
+    """
+    Get global statistics across all sessions and messages.
+    
+    Returns:
+        Dict: Global statistics
+        
+    Raises:
+        HTTPException: If retrieval fails
+    """
+    try:
+        persistence = get_chat_persistence()
+        stats = await persistence.get_global_stats()
+        
+        # Also include RAG service stats
+        rag_service = get_rag_service()
+        rag_stats = rag_service.get_stats()
+        
+        return {
+            "chat_history": stats,
+            "rag_system": rag_stats
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get global statistics: {str(e)}"
+        )
+

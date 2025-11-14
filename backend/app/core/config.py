@@ -4,7 +4,7 @@ Core configuration and settings for the Knowledge Chatbot backend.
 import os
 import json
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     # Advanced Chunking Options
     CHUNK_ADD_SECTION_HEADERS: bool = True  # Prepend section context to chunks
     CHUNK_EXTRACT_METADATA: bool = True     # Extract frontmatter and metadata
+    
+    # MongoDB Configuration
+    MONGODB_URL: str = "mongodb+srv://tuantran245:Tranquoctuan0126@cluster0.pvdzsfu.mongodb.net/?appName=Cluster0"
+    MONGODB_DB_NAME: str = "knowra_chatbot"
+    MONGODB_MAX_POOL_SIZE: int = 10
+    MONGODB_MIN_POOL_SIZE: int = 1
+    MONGODB_TIMEOUT_MS: int = 5000
+    
+    # Redis Configuration (for session metadata)
+    REDIS_URL: Optional[str] = None
     
     # SSE Streaming
     SSE_DELAY: float = 0.01

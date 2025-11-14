@@ -62,6 +62,7 @@ const SessionManager = ({
       return 'Unknown';
     }
   };
+  console.log("session", sessions)
 
   return (
     <div className={`session-manager ${className}`}>
@@ -165,7 +166,7 @@ const SessionManager = ({
                           {session.project_id || 'default'}
                         </span>
                         <span className="session-id">
-                          {session.session_id.slice(0, 8)}...
+                          {session.session_id}
                         </span>
                       </div>
                     </div>
