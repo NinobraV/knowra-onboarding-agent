@@ -546,22 +546,21 @@ Previous conversation:
 
             # Build structured prompt following the OnboardingAI template
             # Use a more concise format to avoid content policy triggers
-            structured_prompt = f"""You are OnboardingAI, an intelligent assistant that answers questions based on company policies, internal documents, and prior conversations.
+            structured_prompt = f"""You are an intelligent assistant created to learn all information about the company's projects. Your task is to respond to users who are either new to the project or need information about the project. Find the information you have learned and answer the users.
+    Rules:
+    - Find synonyms in the knowledge you can learn
+    - Provide accurate, concise answers related to the base data
+    - Use previous messages for continuity if exist
 
-Rules:
-- Provide accurate, concise answers
-- Never hallucinate
-- Use previous messages for continuity
+    Conversation context:
+    {context_text if context_text else "No history yet"}
 
-Conversation context:
-{context_text if context_text else "No relevant context found."}
+    Previous conversation:
+    {message_history_text if message_history_text else "No history yet"}
 
-Previous conversation:
-{message_history_text if message_history_text else "No previous messages."}
+    User question: {query}
 
-User question: {query}
-
-Instructions: Provide a helpful and direct answer. Cite sources when applicable."""
+    Instructions: Provide a helpful answer base on the knowledge you learned."""
 
             # Enforce token limit on the structured prompt
             structured_prompt = self._enforce_token_limit(structured_prompt)

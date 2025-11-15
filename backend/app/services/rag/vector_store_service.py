@@ -302,13 +302,6 @@ class VectorStoreService:
         """
         High-level semantic search by query text. Returns langchain Documents.
         """
-        # embed query
-        # try:
-        #     emb_fn = getattr(self.embeddings, "embed_query", None) or getattr(self.embeddings, "embed_text", None)
-        #     query_vec = emb_fn(query)
-        # except Exception:
-        #     logger.exception("Query embedding failed")
-        #     return []
 
         # Generate query embedding
         query_embedding = self.embeddings.embed_query(query)
@@ -319,9 +312,7 @@ class VectorStoreService:
             top_k=k,
             include_metadata=True
         )
-        # logger.info("Performing semantic search for query: %s", query)
-        # logger.info("namespace %s", namespace)
-        # results = self.search_by_vector(query_vec, k=k, namespace=namespace)        
+      
         documents = []
         for match in results.matches:
             metadata = match.metadata.copy()
