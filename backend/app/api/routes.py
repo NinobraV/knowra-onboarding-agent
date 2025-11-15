@@ -135,31 +135,31 @@ async def chat(request: ChatRequest):
             session_id=session_id,
             project_id=request.project_id
         )
-        
+        print(f"response_text: {response_text}")
+        print(f"metadata: {metadata}")
         # Prepare sources for persistence
-        sources = None
-        if metadata.get('sources'):
-            sources = [
-                {
-                    "id": src.get("id", "unknown"),
-                    "score": src.get("score", 0.0),
-                    "text": src.get("text", ""),
-                    "metadata": src.get("metadata", {})
-                }
-                for src in metadata.get('sources', [])
-            ]
+        # sources = None
+        # if metadata.get('sources'):
+        #     sources = [
+        #         {
+        #             "id": src.get("id", "unknown"),
+        #             "score": src.get("score", 0.0),
+        #             "text": src.get("text", ""),
+        #             "metadata": src.get("metadata", {})
+        #         }
+        #         for src in metadata.get('sources', [])
+        #     ]
         
         # Persist assistant message with metadata
         await persistence.add_message(
             session_id=session_id,
             role="assistant",
             content=response_text,
-            sources=sources,
+            sources=None,
             routing_info=metadata.get('routing_info'),
             safety_info=metadata.get('safety_info'),
             tokens=metadata.get('tokens')
         )
-        
         return ChatResponse(
             response=response_text,
             sources=metadata.get('sources', []),
@@ -170,6 +170,7 @@ async def chat(request: ChatRequest):
         )
             
     except Exception as e:
+        print(f"Chat processing error: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Chat processing failed: {str(e)}"
