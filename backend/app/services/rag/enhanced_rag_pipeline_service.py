@@ -95,7 +95,8 @@ class EnhancedRAGPipelineService:
         retriever_k: int = 5,
         pca_components: int = 128,
         auto_rebuild: bool = True,
-        redis_url: Optional[str] = None
+        redis_url: Optional[str] = None,
+        rebuild_if_needed: Any = None
     ):
         """
         Initialize enhanced RAG pipeline.
@@ -107,6 +108,8 @@ class EnhancedRAGPipelineService:
         self.persist_dir = Path(persist_dir)
         self.auto_rebuild = auto_rebuild
         self.retriever_k = retriever_k
+        self.rebuild_if_needed = rebuild_if_needed
+
         
         # Feature flags
         self.enable_routing = enable_routing and ENHANCED_COMPONENTS_AVAILABLE
@@ -333,26 +336,7 @@ class EnhancedRAGPipelineService:
         """Set current session context."""
         self._current_session_id = session_id
         self._current_project_id = project_id
-    
-    def rebuild_if_needed(self) -> bool:
-        """Check and rebuild vector store if needed."""
-        try:
-            if self.vector_store_service.should_rebuild():
-                logger.info("Rebuilding vector store...")
-                
-                # Load and chunk documents
-                documents = self.chunking_service.load_and_chunk_documents(self.data_dir)
-                
-                # Create vector store
-                self.vector_store_service.create_vectorstore(documents)
-                
-                logger.info(f"Vector store rebuilt with {len(documents)} documents")
-                return True
-        except Exception as e:
-            logger.error(f"Rebuild failed: {e}")
-        
-        return False
-    
+
     async def stream_response(
         self, 
         query: str, 

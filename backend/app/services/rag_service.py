@@ -57,7 +57,8 @@ class RAGService:
     def _initialize_enhanced_pipeline(self, data_dir, persist_dir, openai_api_key):
         """Initialize enhanced RAG pipeline."""
         from app.core.config import settings
-        
+        basic_pipeline_instance = self.create_basic_pipeline_instance(data_dir, persist_dir, openai_api_key)
+
         self._pipeline = EnhancedRAGPipelineService(
             data_dir=data_dir or settings.DATA_DIR,
             persist_dir=persist_dir or settings.VECTOR_STORE_DIR,
@@ -86,7 +87,8 @@ class RAGService:
             enable_session_management=True,
             max_memory_per_session=1000,
             memory_cleanup_interval_hours=6,
-            redis_url=getattr(settings, 'REDIS_URL', None)
+            redis_url=getattr(settings, 'REDIS_URL', None),
+            rebuild_if_needed=basic_pipeline_instance.rebuild_if_needed
         )
         self._is_enhanced = True
         
@@ -94,7 +96,6 @@ class RAGService:
         """Initialize basic RAG pipeline as fallback."""
         from app.services.rag import RAGPipelineService
         from app.core.config import settings
-        
         self._pipeline = RAGPipelineService(
             data_dir=data_dir or settings.DATA_DIR,
             persist_dir=persist_dir or settings.VECTOR_STORE_DIR,
@@ -118,6 +119,33 @@ class RAGService:
         )
         self._is_enhanced = False
     
+    def create_basic_pipeline_instance(self, data_dir, persist_dir, openai_api_key):
+        """Initialize basic RAG pipeline as fallback."""
+        from app.services.rag import RAGPipelineService
+        from app.core.config import settings
+        
+        return RAGPipelineService(
+            data_dir=data_dir or settings.DATA_DIR,
+            persist_dir=persist_dir or settings.VECTOR_STORE_DIR,
+            openai_base_url=settings.OPENAI_BASE_URL,
+            openai_api_key=openai_api_key or settings.OPENAI_API_KEY,
+            embedding_api_key=settings.OPENAI_EMBEDDING_API_KEY or settings.OPENAI_API_KEY,
+            pinecone_api_key=settings.PINECONE_API_KEY,
+            pinecone_environment=settings.PINECONE_ENVIRONMENT,
+            pinecone_index_name=settings.PINECONE_INDEX_NAME,
+            chunk_size=settings.CHUNK_SIZE,
+            chunk_overlap=settings.CHUNK_OVERLAP,
+            embedding_model=settings.OPENAI_EMBEDDING_MODEL,
+            llm_model=settings.OPENAI_MODEL,
+            llm_temperature=settings.OPENAI_TEMPERATURE,
+            retriever_k=settings.RETRIEVER_K,
+            memory_window=settings.MEMORY_WINDOW,
+            pca_components=settings.PCA,
+            auto_rebuild=settings.AUTO_REBUILD_ENABLED,
+            chunk_add_section_headers=settings.CHUNK_ADD_SECTION_HEADERS,
+            chunk_extract_metadata=settings.CHUNK_EXTRACT_METADATA
+        )    
+
     def rebuild_if_needed(self) -> bool:
         """
         Check and rebuild vector store if files changed.
