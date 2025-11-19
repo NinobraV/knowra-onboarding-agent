@@ -8,12 +8,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OPENAI_BASE_URL={OPENAI_BASE_URL}
-      - OPENAI_API_KEY={OPENAI_API_KEY}
-      - OPENAI_EMBEDDING_API_KEY={OPENAI_EMBEDDING_API_KEY}
-      - PINECONE_API_KEY={PINECONE_API_KEY}
-      - PINECONE_ENVIRONMENT={PINECONE_ENVIRONMENT}
-      - PINECONE_INDEX_NAME={PINECONE_INDEX_NAME}
+      - OPENAI_API_KEY=sk-4YIDvGCBj5mv1Qzj2E9DFg
+      - OPENAI_BASE_URL=https://aiportalapi.stu-platform.live/jpe
+      - OPENAI_EMBEDDING_API_KEY=sk-Qu1_uJNYuPFtU62uu8wOWg
+      - PINECONE_API_KEY=pcsk_5EXuVd_SnvVpSXTvG5gkU7GseN5aYAhc7TNG5dUZBkodnNiAi2e1pMez6HfK6thNfeLsYM
+      - PINECONE_ENVIRONMENT=us-east-1
+      - PINECONE_INDEX_NAME=knowra-onboarding
       - PORT=8000
       - HOST=0.0.0.0
       - DATA_DIR=/app/data/raw
